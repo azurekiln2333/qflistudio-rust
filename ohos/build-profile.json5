@@ -1,0 +1,67 @@
+{
+  "app": {
+    // 签名材料来自 DevEco 的「Automatically generate signature」：
+    //   C:\Users\lichengyu\.ohos\config\default_ohos_EyK2s6z...{cer,p7b,p12}
+    // 其 .p7b 绑的正是 com.azurekiln.qfli.rustcore，与本 App 的 bundleName 一致。
+    //
+    // 关键：products[].signingConfig 这一项**必须写**。只填 signingConfigs 数组不够，
+    // hvigor 不会自动挑「唯一的那一个」，缺了它只会打
+    //   WARN: No signingConfig found for product default
+    // 然后跳过 SignHap（`SignHap... after 1 ms`），产出 entry-default-unsigned.hap，
+    // 装到设备上报：
+    //   code:9568320  error: no signature file.
+    //
+    // 换 bundleName 就得换 .p7b（描述文件绑死 bundleName）：要么在 DevEco 里重新
+    // 自动生成，要么去 AGC 新建应用重签。把 bundleName 改回 com.azurekiln.qflistudio
+    // 也能复用主工程那套，但两个 App 会互相覆盖安装。
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_EyK2s6zPODEbf3XHtkcGYQQuAS6k-HePGMeNPRNUwSI=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B0DF223E4A60E8ED4BB0753D188F2F65AB4F69E687DF24D13BEEFA583A71D486AA6999AB2FB8788",
+          "profile": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_EyK2s6zPODEbf3XHtkcGYQQuAS6k-HePGMeNPRNUwSI=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_EyK2s6zPODEbf3XHtkcGYQQuAS6k-HePGMeNPRNUwSI=.p12",
+          "storePassword": "0000001BF4EC908A7AD17F26ECA21D73D798DA802700061AC190C283A47EE7A1CB119170B296F4EEC00BAE"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "5.1.0(18)",
+        "runtimeOS": "HarmonyOS",
+        "targetSdkVersion": "6.1.1(24)"
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "profile"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}
