@@ -11,4 +11,4 @@ PRODUCT_NAME = QFLIRustCore
 PRODUCT_BUNDLE_IDENTIFIER = com.azurekiln.qfli.rustcore
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.qflistudio. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.azurekiln.qfli. All rights reserved.
