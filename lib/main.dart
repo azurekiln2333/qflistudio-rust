@@ -26,6 +26,9 @@ const StudioProfile rustProfile = StudioProfile(
   runner: RustProgramRunner(),
   productKey: StudioProductCatalog.rustCoreKey,
   showHomeTabs: false,
+  runtimeKind: 'embedded-rust-runtime',
+  runtimeStatus: 'unavailable',
+  supportedFileExtensions: ['.rs'],
   // main.rs 排在默认入口表前面，保证本版一定先命中它。
   entryFileNames: ['main.rs', 'src/main.rs'],
 );
