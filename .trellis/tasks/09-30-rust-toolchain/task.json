@@ -1,0 +1,28 @@
+{
+  "id": "rust-toolchain",
+  "name": "rust-toolchain",
+  "title": "Rust interpreter and compiler toolchain",
+  "description": "Deliver verified Rust interpretation, compilation, execution and practical Rust tooling across supported platforms",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "lichengyu",
+  "assignee": "lichengyu",
+  "createdAt": "2026-09-30",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-30-desktop-rust-runtime"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
