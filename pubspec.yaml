@@ -3,8 +3,6 @@ description: "QFLIRustCore：Rust 编辑器与桌面工具链入口。"
 publish_to: 'none'
 version: 1.0.0+1
 
-resolution: workspace
-
 environment:
   sdk: ^3.11.5
 
@@ -13,11 +11,15 @@ dependencies:
     sdk: flutter
 
   qfli_studio_core:
-    path: ../../packages/qfli_studio_core
+    path: ../qfli_studio_core
 
   path: ^1.9.1
 
   cupertino_icons: ^1.0.8
+
+dependency_overrides:
+  re_editor:
+    path: ../qfli_studio_core/vendor/re_editor
 
 dev_dependencies:
   flutter_test:

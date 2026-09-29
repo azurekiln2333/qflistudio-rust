@@ -1,0 +1,109 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+# flutter tool 在包目录里落的状态文件（含 workspace 成员）
+.flutter
+.flutter_tool_state
+.pub-cache/
+.pub/
+**/build/
+**/.dart_tool/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# 第三方原生解释器源码：按 apps/qfli_c/native/README.md 的命令 clone 进来，
+# 不进版本库（上游在 GitLab，自己 clone 比在这里维护一份副本可靠）。
+/apps/qfli_c/native/third_party/picoc/
+
+# HarmonyOS 原生构建产物
+/apps/qfli_c/ohos/**/build/
+/apps/qfli_c/ohos/**/oh_modules/
+/apps/qfli_c/ohos/**/node_modules/
+/apps/qfli_c/ohos/**/.hvigor/
+/apps/qfli_c/ohos/entry/libs/
+
+# The same generated platform directories exist in every language App.
+**/ohos/**/build/
+**/ohos/**/oh_modules/
+**/ohos/**/node_modules/
+**/ohos/**/.hvigor/
+**/ohos/entry/libs/
+
+# Native language runtime build output
+**/native/build/
+
+# Local AI/editor tool state; project instructions remain tracked in .agents/.trellis.
+/.agent/
+/.claude/
+/.codebuddy/
+/.cursor/
+/.gemini/
+/.pi/
+/.qoder/
+/.workbuddy-ai/
+/.zcode/
+
+# Local Trellis/agent runtime metadata. Committed task artifacts remain visible.
+/.agents/
+/.dsh/
+/.trellis/.gitignore
+/.trellis/.template-hashes.json
+/.trellis/.version
+/.trellis/agents/
+/.trellis/config.yaml
+/.trellis/scripts/
+/.trellis/spec/
+/.trellis/tasks/00-bootstrap-guidelines/
+/.trellis/workflow.md
+/.trellis/workspace/
+
+# Local diagnostic exports and shell inspection fragments
+/_*.txt
+/tmp_*.txt
+/s[1-5].txt
+/rc[1-2].txt
+/run_chunk.txt
+/corelist.txt
+/lib_tree.txt
+/.dsh_*.txt
+/.dsh_tmp/
+/.gitstatus.txt
+/.gs.txt
+/.st.txt
