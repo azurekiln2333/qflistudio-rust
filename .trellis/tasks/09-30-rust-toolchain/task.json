@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "09-30-desktop-rust-runtime"
+    "09-30-desktop-rust-runtime",
+    "09-30-cargo-rust-project"
   ],
   "parent": null,
   "relatedFiles": [],

@@ -11,3 +11,5 @@ checkout-parent/
 Run `flutter pub get` here, then `flutter run` for the target device. The shared editor patch is provided by `../qfli_studio_core/vendor/re_editor`.
 
 On Windows, macOS, and Linux, install the official Rust toolchain and make `cargo` and `rustc` available on `PATH`. The Run action uses `cargo run` for projects with `Cargo.toml`, and compiles a standalone `.rs` entry with `rustc` before executing it. A project-root `input.txt` supplies standard input when present. Compiler diagnostics and program output appear in the editor terminal. Mobile platforms still require an in-process Rust runtime; the desktop toolchain cannot execute inside their application sandbox.
+
+New Rust projects include `Cargo.toml` and ignore Cargo's `target/` directory. Existing Rust folders are left as they are and can still run as standalone source files.

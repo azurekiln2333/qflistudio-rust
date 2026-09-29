@@ -7,9 +7,9 @@ import 'package:qfli_studio_core/services/project_templates.dart';
 import 'package:qfli_studio_core/services/studio_profile.dart';
 import 'package:qfli_studio_core/splash_screen.dart';
 import 'package:qfli_studio_core/store/auth_store.dart';
-import 'package:qfli_studio_core/store/project_store.dart';
 import 'package:qfli_studio_core/store/settings_store.dart';
 
+import 'rust_project_store.dart';
 import 'rust_runner.dart';
 
 /// 本 App 的产品名。窗口标题、任务切换器和应用内顶栏都读它。
@@ -39,7 +39,7 @@ void main() async {
   // 在 runApp 之前定档。
   StudioProfile.current = rustProfile;
 
-  final store = ProjectStore();
+  final store = RustProjectStore();
   final auth = AuthStore();
   final settings = SettingsStore();
   final ready = ValueNotifier<bool>(false);
