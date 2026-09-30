@@ -5,7 +5,10 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:qfli_studio_core/services/studio_profile.dart';
 
-/// Runs Rust projects with the installed desktop Cargo and rustc toolchains.
+import 'ohos_miri_assets.dart';
+import 'ohos_miri_runner.dart';
+
+/// Runs desktop Cargo/rustc or the packaged in-process OHOS Miri engine.
 class RustProgramRunner implements ProgramRunner {
   const RustProgramRunner({
     this.cargoExecutable = 'cargo',
@@ -25,6 +28,16 @@ class RustProgramRunner implements ProgramRunner {
     final root = p.normalize(p.absolute(projectPath));
     final entry = p.normalize(p.absolute(entryFile));
     final title = '运行 ${p.basename(entry)}（Rust）';
+    if (Platform.operatingSystem == 'ohos') {
+      try {
+        final sysroot = await prepareOhosMiriAssets();
+        return OhosMiriProgramRunner(
+          sysrootPath: sysroot,
+        ).run(projectPath: projectPath, entryFile: entryFile);
+      } catch (error) {
+        return _failure(title, '无法加载 Rust 运行库：$error');
+      }
+    }
     if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) {
       return _failure(title, '当前平台无法启动 Rust 工具链。请在桌面端运行。');
     }

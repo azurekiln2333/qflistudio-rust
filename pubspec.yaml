@@ -14,6 +14,7 @@ dependencies:
     path: ../qfli_studio_core
 
   path: ^1.9.1
+  ffi: ^2.2.0
 
   cupertino_icons: ^1.0.8
 
@@ -30,3 +31,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/app_icon.png
+    - assets/miri/

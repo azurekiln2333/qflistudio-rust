@@ -41,3 +41,35 @@ Official Rust OHOS targets are program targets, not proof that the rustc host
 toolchain and Miri can be built and embedded on HarmonyOS. If the upstream host
 build fails, record the exact blocker before choosing another genuine upstream
 engine. Do not substitute a small custom Rust evaluator.
+
+## Implemented Session And Packaging
+
+`native/miri_adapter/qfli_miri.h` owns ABI 1. `create` copies absolute source and
+sysroot paths, stdin and resource limits. `run` blocks on a worker thread;
+`cancel`, output copying and result inspection may run concurrently. Compiler
+sessions are serialized. Destroy follows completion of every active ABI call.
+
+The interpreted guest is always `x86_64-unknown-linux-gnu`, independent of the
+ARM64/x64 OHOS host. The sysroot contains MIR-encoded guest standard libraries
+and the matching host backend used by compiler target-feature queries. x64 uses
+the upstream Cranelift backend built with its custom compiler driver.
+
+`scripts/package_miri_ohos.ps1` follows native ELF dependencies and copies them
+to `ohos/entry/libs/<ABI>`. MIR libraries, the host backend and license files are
+flattened as SHA-256 `.bin` assets because Flutter directory assets are not
+recursive. The generated manifest identifies the native host, guest target,
+checksums and dependency notices. It describes one native architecture per
+packaging invocation; build the HAP for that same architecture.
+
+`lib/ohos_miri_assets.dart` extracts assets into
+`AppPaths.storageDirectory()/rust_runtime/<manifest-id>`. Completed files are
+reused by size; partial files are written before rename. A failed preparation
+can be retried. `lib/ohos_miri_runner.dart` loads the ABI, supplies `input.txt`,
+polls bounded raw output with incremental UTF-8 decoding and runs compilation
+and interpretation in a worker isolate. Cancellation retains the session until
+the native call returns; it must not kill the isolate and free an active handle.
+
+This path performs genuine upstream parsing, type checking, macro expansion and
+MIR interpretation. ABI 1 does not resolve external Cargo dependencies or run
+build scripts. Cancellation is cooperative at compiler phases and MIR blocks;
+the guest allocation limit does not bound rustc host memory.
