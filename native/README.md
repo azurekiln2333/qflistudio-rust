@@ -1,4 +1,12 @@
-# OHOS native ABI probe
+# OHOS native Rust components
+
+The upstream source runtime lives in [miri_adapter](miri_adapter/README.md).
+Its C ABI embeds Rust 1.98.1 and Miri, with session I/O, diagnostics,
+cancellation and execution limits. Both ARM64 and x64 OHOS shared libraries
+compile. The Flutter OHOS runner uses this ABI; packaged source execution is
+still unverified and runtime availability remains unchanged.
+
+## Native ABI probe
 
 This probe verifies native packaging and a Dart-to-Rust C ABI call. It is not a
 Rust source interpreter and does not enable the mobile runtime.
@@ -56,6 +64,10 @@ features are disabled because the upstream dependencies do not support OHOS.
 A successful library build would still need a native session adapter and HAP
 source-execution tests before the app can use it.
 
+The session adapter is now implemented separately; this older script remains
+the core-library compile experiment. Use `build_miri_adapter.sh` to build the
+actual shared runtime.
+
 The AArch64 OHOS library build passed in WSL on 2026-09-30. The x64 OHOS
 compiler-private libraries needed for the simulator are not present in the
 official Rust 1.98.1 distribution; that architecture needs a source bootstrap.
@@ -83,3 +95,6 @@ and stderr, checks stdin and exit status 7, and requires the upstream `E0502`
 and `E0308` diagnostics with empty stdout for invalid programs. These five CLI
 checks passed on Linux on 2026-09-30. They validate the upstream reference,
 and do not establish in-process ABI behavior or HAP source execution.
+
+The later C ABI reference checks and native build results are recorded in
+`.trellis/tasks/09-30-ohos-rust-interpreter/research/miri-adapter-validation.md`.

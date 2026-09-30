@@ -1,0 +1,249 @@
+--- a/src/eval.rs
++++ b/src/eval.rs
+@@ -89,6 +89,16 @@
+ /// will hang the program.
+ const MAIN_THREAD_YIELDS_AT_SHUTDOWN: u32 = 256;
+ 
++/// Per-interpreter host I/O and cooperative execution control for embedding.
++pub trait EmbeddedSession: std::fmt::Debug + Send + Sync {
++    fn read_stdin(&self, buffer: &mut [u8]) -> std::io::Result<usize>;
++    fn write_output(&self, stderr: bool, buffer: &[u8]) -> std::io::Result<usize>;
++    /// Return false to stop at the current MIR basic-block terminator.
++    fn before_basic_block(&self) -> bool;
++    fn reserve_memory(&self, bytes: usize) -> bool;
++    fn release_memory(&self, bytes: usize);
++}
++
+ /// Configuration needed to spawn a Miri instance.
+ #[derive(Clone)]
+ pub struct MiriConfig {
+@@ -172,6 +182,8 @@
+     pub short_fd_operations: bool,
+     /// A list of crates that are considered user-relevant.
+     pub user_relevant_crates: Vec<String>,
++    /// Optional session-local hooks; CLI behavior is unchanged when absent.
++    pub embedded_session: Option<std::sync::Arc<dyn EmbeddedSession>>,
+ }
+ 
+ impl Default for MiriConfig {
+@@ -215,6 +227,7 @@
+             float_rounding_error: FloatRoundingErrorMode::Random,
+             short_fd_operations: true,
+             user_relevant_crates: vec![],
++            embedded_session: None,
+         }
+     }
+ }
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -156,7 +156,7 @@
+ pub use crate::diagnostics::{
+     EvalContextExt as _, NonHaltingDiagnostic, TerminationInfo, report_result,
+ };
+-pub use crate::eval::{MiriConfig, MiriEntryFnType, create_ecx, entry_fn, eval_entry};
++pub use crate::eval::{EmbeddedSession, MiriConfig, MiriEntryFnType, create_ecx, entry_fn, eval_entry};
+ pub use crate::helpers::{EvalContextExt as _, ToU64 as _, ToUsize as _};
+ pub use crate::intrinsics::EvalContextExt as _;
+ pub use crate::machine::{
+--- a/src/machine.rs
++++ b/src/machine.rs
+@@ -490,6 +490,8 @@
+     // We carry a copy of the global `TyCtxt` for convenience, so methods taking just `&Evaluator` have `tcx` access.
+     pub tcx: TyCtxt<'tcx>,
+ 
++    pub(crate) embedded_session: Option<std::sync::Arc<dyn crate::EmbeddedSession>>,
++
+     /// Global data for borrow tracking.
+     pub borrow_tracker: Option<borrow_tracker::GlobalState>,
+ 
+@@ -757,6 +759,7 @@
+ 
+         MiriMachine {
+             tcx,
++            embedded_session: config.embedded_session.clone(),
+             borrow_tracker,
+             data_race,
+             alloc_addresses,
+@@ -1019,6 +1022,7 @@
+     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+         #[rustfmt::skip]
+         let MiriMachine {
++            embedded_session: _,
+             threads,
+             thread_cpu_affinity: _,
+             tls,
+@@ -1784,6 +1788,12 @@
+     }
+ 
+     fn before_terminator(ecx: &mut InterpCx<'tcx, Self>) -> InterpResult<'tcx> {
++        if let Some(session) = &ecx.machine.embedded_session {
++            if !session.before_basic_block() {
++                ecx.machine.handle_abnormal_termination();
++                throw_machine_stop!(TerminationInfo::Interrupted);
++            }
++        }
+         ecx.machine.basic_block_count += 1u64; // a u64 that is only incremented by 1 will "never" overflow
+         ecx.machine.since_gc += 1;
+         // Possibly report our progress. This will point at the terminator we are about to execute.
+@@ -1981,7 +1991,9 @@
+ 
+         match &self.allocator {
+             Some(alloc) => MiriAllocParams::Isolated(alloc.clone()),
+-            None => MiriAllocParams::Global,
++            None => self.embedded_session.as_ref().map_or(
++                MiriAllocParams::Global, |session| MiriAllocParams::Embedded(session.clone()),
++            ),
+         }
+     }
+ 
+--- a/src/alloc/alloc_bytes.rs
++++ b/src/alloc/alloc_bytes.rs
+@@ -13,6 +13,7 @@
+ #[derive(Clone, Debug)]
+ pub enum MiriAllocParams {
+     Global,
++    Embedded(std::sync::Arc<dyn crate::EmbeddedSession>),
+     Isolated(Rc<RefCell<IsolatedAlloc>>),
+ }
+ 
+@@ -54,6 +55,10 @@
+         unsafe {
+             match self.params.clone() {
+                 MiriAllocParams::Global => alloc::dealloc(self.ptr, alloc_layout),
++                MiriAllocParams::Embedded(session) => {
++                    alloc::dealloc(self.ptr, alloc_layout);
++                    session.release_memory(alloc_layout.size());
++                }
+                 MiriAllocParams::Isolated(alloc) =>
+                     alloc.borrow_mut().dealloc(self.ptr, alloc_layout),
+             }
+@@ -95,8 +100,16 @@
+         // When size is 0 we allocate 1 byte anyway, to ensure each allocation has a unique address.
+         let alloc_layout =
+             if size == 0 { Layout::from_size_align(1, align).unwrap() } else { layout };
++        if let MiriAllocParams::Embedded(session) = &params {
++            if !session.reserve_memory(alloc_layout.size()) {
++                std::panic::resume_unwind(Box::new(rustc_errors::FatalErrorMarker));
++            }
++        }
+         let ptr = alloc_fn(alloc_layout, &params);
+         if ptr.is_null() {
++            if let MiriAllocParams::Embedded(session) = &params {
++                session.release_memory(alloc_layout.size());
++            }
+             Err(())
+         } else {
+             // SAFETY: All `MiriAllocBytes` invariants are fulfilled.
+@@ -119,7 +132,7 @@
+         // SAFETY: `alloc_fn` will only be used with `size != 0`.
+         let alloc_fn = |layout, params: &MiriAllocParams| unsafe {
+             match params {
+-                MiriAllocParams::Global => alloc::alloc(layout),
++                MiriAllocParams::Global | MiriAllocParams::Embedded(_) => alloc::alloc(layout),
+                 MiriAllocParams::Isolated(alloc) => alloc.borrow_mut().alloc(layout),
+             }
+         };
+@@ -139,7 +152,7 @@
+         // SAFETY: `alloc_fn` will only be used with `size != 0`.
+         let alloc_fn = |layout, params: &MiriAllocParams| unsafe {
+             match params {
+-                MiriAllocParams::Global => alloc::alloc_zeroed(layout),
++                MiriAllocParams::Global | MiriAllocParams::Embedded(_) => alloc::alloc_zeroed(layout),
+                 MiriAllocParams::Isolated(alloc) => alloc.borrow_mut().alloc_zeroed(layout),
+             }
+         };
+--- a/src/shims/files.rs
++++ b/src/shims/files.rs
+@@ -264,6 +264,10 @@
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
++        if let Some(session) = ecx.machine.embedded_session.clone() {
++            let result = ecx.read_from_host(|buf| session.read_stdin(buf), len, ptr)?;
++            return finish.call(ecx, result);
++        }
+         if !communicate_allowed {
+             // We want isolation mode to be deterministic, so we have to disallow all reads, even stdin.
+             helpers::isolation_abort_error("`read` from stdin")?;
+@@ -288,6 +292,21 @@
+     }
+ }
+ 
++struct SessionOutput {
++    session: std::sync::Arc<dyn crate::EmbeddedSession>,
++    stderr: bool,
++}
++
++impl io::Write for SessionOutput {
++    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
++        self.session.write_output(self.stderr, buffer)
++    }
++
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(())
++    }
++}
++
+ impl FileDescription for io::Stdout {
+     fn name(&self) -> &'static str {
+         "stdout"
+@@ -301,6 +320,10 @@
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
++        if let Some(session) = ecx.machine.embedded_session.clone() {
++            let result = ecx.write_to_host(SessionOutput { session, stderr: false }, len, ptr)?;
++            return finish.call(ecx, result);
++        }
+         // We allow writing to stdout even with isolation enabled.
+         let result = ecx.write_to_host(&*self, len, ptr)?;
+         // Stdout is buffered, flush to make sure it appears on the
+@@ -349,6 +372,10 @@
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
++        if let Some(session) = ecx.machine.embedded_session.clone() {
++            let result = ecx.write_to_host(SessionOutput { session, stderr: true }, len, ptr)?;
++            return finish.call(ecx, result);
++        }
+         // We allow writing to stderr even with isolation enabled.
+         let result = ecx.write_to_host(&*self, len, ptr)?;
+         // No need to flush, stderr is not buffered.
+--- a/src/shims/foreign_items.rs
++++ b/src/shims/foreign_items.rs
+@@ -507,11 +507,15 @@
+                 let msg = this.read_immediate(msg)?;
+                 let msg = this.read_byte_slice(&msg)?;
+                 // Note: we're ignoring errors writing to host stdout/stderr.
+-                let _ignore = match link_name.as_str() {
+-                    "miri_write_to_stdout" => std::io::stdout().write_all(msg),
+-                    "miri_write_to_stderr" => std::io::stderr().write_all(msg),
+-                    _ => unreachable!(),
+-                };
++                if let Some(session) = &this.machine.embedded_session {
++                    let _ignore = session.write_output(link_name.as_str() == "miri_write_to_stderr", msg);
++                } else {
++                    let _ignore = match link_name.as_str() {
++                        "miri_write_to_stdout" => std::io::stdout().write_all(msg),
++                        "miri_write_to_stderr" => std::io::stderr().write_all(msg),
++                        _ => unreachable!(),
++                    };
++                }
+             }
+             // Promises that a pointer has a given symbolic alignment.
+             "miri_promise_symbolic_alignment" => {
+--- a/src/diagnostics.rs
++++ b/src/diagnostics.rs
+@@ -488,7 +488,11 @@
+         &ecx.machine,
+     );
+ 
+-    eprint!("{extra}"); // newlines are already in the string
++    if let Some(session) = &ecx.machine.embedded_session {
++        let _ignore = session.write_output(true, extra.as_bytes());
++    } else {
++        eprint!("{extra}"); // newlines are already in the string
++    }
+ 
+     // Include a note like `std` does when we omit frames from a backtrace
+     if pruned {
