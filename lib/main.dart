@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:qfli_studio_core/app.dart';
 import 'package:qfli_studio_core/services/project_templates.dart';
@@ -35,8 +36,10 @@ const StudioProfile rustProfile = StudioProfile(
   entryFileNames: ['main.rs', 'src/main.rs'],
 );
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+Future<void> main() async {
+  final binding = WidgetsFlutterBinding.ensureInitialized();
+  final nativeStartup = !kIsWeb && defaultTargetPlatform == TargetPlatform.ohos;
+  if (nativeStartup) binding.deferFirstFrame();
   if (kDebugMode && defaultTargetPlatform == TargetPlatform.ohos) {
     try {
       debugPrint(
@@ -54,17 +57,51 @@ void main() async {
   final auth = AuthStore();
   final settings = SettingsStore();
   final ready = ValueNotifier<bool>(false);
-  // 先 runApp 品牌启动页（与原生遮罩同色，无白屏），数据后台并行加载。
   runApp(QfliApp(store: store, auth: auth, settings: settings, ready: ready));
-  // 首帧提交后再做磁盘/插件初始化，避免与首帧构建争用主 isolate。
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    unawaited(
-      AppBootstrap.run(
+
+  const platformChannel = MethodChannel('qflistudio/platform');
+  Future<void> reportProgress(double progress) async {
+    try {
+      await platformChannel.invokeMethod<void>('startupProgress', {
+        'progress': progress,
+      });
+    } on PlatformException catch (error) {
+      debugPrint('Startup progress unavailable: ${error.code}');
+    } on MissingPluginException {
+      // Other platform shells use the Flutter startup screen.
+    }
+  }
+
+  Future<void> completeStartup() async {
+    try {
+      final minimumDisplay = nativeStartup
+          ? Future<void>.delayed(const Duration(milliseconds: 1100))
+          : Future<void>.value();
+      if (nativeStartup) {
+        await Future<void>.delayed(const Duration(milliseconds: 160));
+      }
+      await AppBootstrap.run(
         store: store,
         auth: auth,
         settings: settings,
         ready: ready,
-      ),
-    );
+        onProgress: nativeStartup
+            ? (progress) => unawaited(reportProgress(progress))
+            : null,
+      );
+      await Future.wait([
+        minimumDisplay,
+        if (nativeStartup)
+          Future<void>.delayed(const Duration(milliseconds: 320)),
+      ]);
+      // Keep the native splash until the home page is built and laid out.
+      if (nativeStartup) await binding.endOfFrame;
+    } finally {
+      if (nativeStartup) binding.allowFirstFrame();
+    }
+  }
+
+  binding.addPostFrameCallback((_) {
+    unawaited(completeStartup());
   });
 }

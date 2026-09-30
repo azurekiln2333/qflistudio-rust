@@ -46,7 +46,15 @@ export default class EntryAbility extends FlutterAbility {
     );
     platformChannel.setMethodCallHandler({
       onMethodCall(call: MethodCall, result: MethodResult): void {
-        if (call.method === 'openUrl') {
+        if (call.method === 'startupProgress') {
+          const progress = call.argument('progress') as number;
+          if (typeof progress === 'number' && Number.isFinite(progress)) {
+            abilityContext.eventHub.emit('EVENT_STARTUP_PROGRESS', Math.max(0, Math.min(1, progress)));
+            result.success(null);
+          } else {
+            result.error('INVALID_PROGRESS', 'Startup progress must be a number', null);
+          }
+        } else if (call.method === 'openUrl') {
           const url = call.argument('url') as string;
           const want: Want = {
             action: 'ohos.want.action.viewData',
