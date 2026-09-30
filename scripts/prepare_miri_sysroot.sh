@@ -7,10 +7,12 @@ if [ "$#" -ne 1 ]; then
 fi
 
 source_dir=$(realpath "$1")
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 if [ ! -f "$source_dir/Cargo.toml" ] || [ ! -f "$source_dir/cargo-miri/Cargo.lock" ]; then
   echo 'Missing Miri and cargo-miri source manifests/lockfile.' >&2
   exit 2
 fi
+sh "$script_dir/check_miri_source.sh" "$source_dir"
 
 build_root=/tmp/qfli-miri-reference-1.98.1
 export RUSTUP_HOME=/tmp/qfli-miri-cross-1.98.1/rustup
@@ -33,6 +35,7 @@ mkdir -p "$build_root"
 if [ ! -f "$build_root/source/Cargo.toml" ]; then
   cp -R "$source_dir" "$build_root/source"
 fi
+sh "$script_dir/check_miri_source.sh" "$build_root/source"
 
 cargo rustc --manifest-path "$build_root/source/Cargo.toml" \
   --no-default-features --features stack-cache --bin miri --locked \

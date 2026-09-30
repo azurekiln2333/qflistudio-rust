@@ -33,6 +33,31 @@ Expected output files include their final newline, and are compared with `cmp`.
 The `cancel.rs` fixture is for the later native cancellation gate and is not
 part of this CLI reference check.
 
+## Reproducibility Review
+
+`check_miri_source.sh` pins the normalized build-input SHA-256 to
+`92f51c0345496c6ef1edbba009985c84b612630dd5c7e81ea2cdd826d0d85764`.
+It hashes the sorted relative paths and CRLF-normalized contents of all files
+under `src/` and `cargo-miri/src/`, both manifests and lockfiles, and cargo-miri's
+build script. Adding a root build script also changes the fingerprint. Tests,
+Git metadata, generated targets and disabled optional-feature packages are not
+part of this build-input pin. The input snapshot and existing Linux cached copy
+matched before this pin was recorded.
+
+Preparation validates both the supplied source and any cached copy, so changing
+the source argument cannot silently reuse another revision. Validation also
+checks the cached source and the Miri binary's compiler commit. A mismatched
+cache exits with an error; it is not silently replaced. These checks establish
+the known local build inputs, and do not authenticate independently supplied
+binaries or prove mobile execution.
+
+The review reran preparation successfully using the existing build and MIR
+sysroot. All five CLI assertions passed again with results in
+`/tmp/qfli-miri-reference-1.98.1/validation.gC9Ki3`. Shell syntax checks and
+ShellCheck passed for all three scripts. A temporary source copy passed after
+conversion to LF and to CRLF; changed manifest contents, changed CLI source,
+and a missing cargo-miri build script each failed the source check.
+
 ## Build And Invocation Details
 
 - The first Linux CLI link failed to find `-lLLVM-22-rust-1.98.1-stable`.

@@ -6,7 +6,7 @@ if [ "$#" -ne 0 ]; then
   exit 2
 fi
 
-project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 fixtures="$project_dir/native/fixtures"
 reference_root=/tmp/qfli-miri-reference-1.98.1
 toolchain=/tmp/qfli-miri-cross-1.98.1/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu
@@ -16,6 +16,12 @@ export LD_LIBRARY_PATH="$toolchain/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 miri="$reference_root/target/debug/miri"
 if [ ! -x "$miri" ] || [ ! -d "$MIRI_SYSROOT/lib/rustlib/x86_64-unknown-linux-gnu/lib" ]; then
   echo 'Run prepare_miri_sysroot.sh before the reference validation.' >&2
+  exit 2
+fi
+sh "$project_dir/scripts/check_miri_source.sh" "$reference_root/source"
+compiler_version=$("$miri" -vV)
+if [ "$(printf '%s\n' "$compiler_version" | sed -n 's/^commit-hash: //p')" != '48a229ceaefd4985c50990b14116b6d856af0985' ]; then
+  echo 'The reference Miri binary must use the pinned Rust 1.98.1 compiler.' >&2
   exit 2
 fi
 
