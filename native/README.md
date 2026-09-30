@@ -59,3 +59,27 @@ source-execution tests before the app can use it.
 The AArch64 OHOS library build passed in WSL on 2026-09-30. The x64 OHOS
 compiler-private libraries needed for the simulator are not present in the
 official Rust 1.98.1 distribution; that architecture needs a source bootstrap.
+
+## Upstream reference execution
+
+The adapter needs a standard library with encoded MIR, rather than the
+ordinary downloaded `rust-std`. On the same Linux host used by the cross-build
+check, prepare an isolated upstream Miri CLI and its MIR sysroot:
+
+```sh
+sh scripts/prepare_miri_sysroot.sh <Rust-source>/src/tools/miri
+sh scripts/verify_miri_reference.sh
+```
+
+The preparation script uses the pinned Linux toolchain installed by
+`check_miri_ohos.sh`, adds `rust-src`, and builds Miri and cargo-miri with their
+upstream lockfiles. Outputs are in `/tmp/qfli-miri-reference-1.98.1`.
+The guest target is `x86_64-unknown-linux-gnu`; Miri can interpret this target
+independently of the native host's architecture. This guest choice must be
+explicit in the eventual mobile session contract.
+
+The reference check executes fixtures from `native/fixtures`, compares stdout
+and stderr, checks stdin and exit status 7, and requires the upstream `E0502`
+and `E0308` diagnostics with empty stdout for invalid programs. These five CLI
+checks passed on Linux on 2026-09-30. They validate the upstream reference,
+and do not establish in-process ABI behavior or HAP source execution.

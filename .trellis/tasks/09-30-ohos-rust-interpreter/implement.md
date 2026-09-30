@@ -9,6 +9,9 @@
       AArch64 Miri core-library compilation now passes with Linux host
       compiler components; shared-library embedding and x64 private compiler
       components remain pending.
+      The upstream Linux CLI and MIR standard library now pass five source
+      fixtures (modules/generics, stdin, exit 7, E0502 and E0308); this is
+      reference behavior, not the HAP acceptance gate.
 - [ ] Integrate the viable upstream source-to-MIR-to-execution path through a
       native session boundary, including I/O, diagnostics and cancellation.
 - [ ] Exercise valid, invalid, stdin, nonzero-exit and cancellation fixtures on

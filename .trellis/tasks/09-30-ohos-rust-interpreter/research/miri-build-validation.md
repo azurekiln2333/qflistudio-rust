@@ -30,7 +30,7 @@ Date: 2026-09-30. These are build results, not source-execution results.
    identities do not match the OHOS compiler-private metadata.
 5. `rustc -Zls=all` reported Windows `rustc_macros` hash
    `c2b035bd0efa146c7bd3eba98b2c41f7`; OHOS `rustc_abi` metadata records its
-   build-host macro hash as `386f00c44f35b37a8ab94d84df9b3cf3`. Search paths or
+   build-host macro hash as `8ab94d84df9b3cf3386f00c44f35b37a`. Search paths or
    renamed DLLs cannot change this identity.
 
 Logs: `$env:TEMP/qfli-miri-ohos-build.log` and

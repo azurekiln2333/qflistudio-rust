@@ -1,0 +1,4 @@
+*.rs text eol=lf
+*.stdout text eol=lf
+*.stderr text eol=lf
+*.input text eol=lf

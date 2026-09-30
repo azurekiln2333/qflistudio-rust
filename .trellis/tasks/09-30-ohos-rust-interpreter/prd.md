@@ -7,8 +7,9 @@ Port a genuine upstream Rust interpretation path into the HarmonyOS app and veri
 ## Confirmed Facts
 
 - Desktop execution already uses official Cargo/rustc through an external process.
-- The OHOS target can produce an AArch64 Rust shared library with the installed SDK, but HAP loading and execution have not been verified.
+- Rust native-library packaging and calls passed in a HAP on the x64 OHOS simulator at `127.0.0.1:5555`. This probe did not interpret Rust source.
 - Miri depends on compiler-private Rust crates, so a target-compiled shared library alone does not provide a Rust source interpreter.
+- The pinned upstream Miri library compiles for AArch64 OHOS. Its Linux CLI and MIR standard library execute five reference fixtures; mobile session execution remains unverified.
 
 ## Requirements
 
