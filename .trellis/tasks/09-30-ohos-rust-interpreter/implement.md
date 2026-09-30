@@ -6,6 +6,9 @@
       capture the device architecture, installation, call result and logs.
 - [ ] Pin compatible upstream rustc/Miri revisions and test an OHOS host build
       of their required crates; save exact commands and errors.
+      AArch64 Miri core-library compilation now passes with Linux host
+      compiler components; shared-library embedding and x64 private compiler
+      components remain pending.
 - [ ] Integrate the viable upstream source-to-MIR-to-execution path through a
       native session boundary, including I/O, diagnostics and cancellation.
 - [ ] Exercise valid, invalid, stdin, nonzero-exit and cancellation fixtures on

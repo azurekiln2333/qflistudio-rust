@@ -34,3 +34,13 @@
 - No local OHOS **host** rustc/Cargo installation, matching `rustc-dev` libraries, full Rust source tree, or Miri build was present. No actual OHOS host or Miri build was run in this research pass. This finding is based on official distribution and source evidence; it does not claim an embeddable engine or successful HAP execution.
 - No merged OHOS patch for the two named Miri native dependencies was found in the checked upstream issues/PRs. `--no-default-features` plus disabled jemalloc remains a hypothesis, not a tested workaround. A successful compile would still need the app-process ABI and the PRD's Rust fixture suite on device.
 - The official Tier 2 host-tool classification corrects the earlier implication in `upstream-and-target.md` that rustc host feasibility was unknown; Miri support remains the distinct blocker. Keep `runtimeStatus` unavailable until actual source execution passes on a packaged HAP.
+
+## Follow-up Build Evidence
+
+The subsequent experiments in `miri-build-validation.md` compiled the upstream
+Miri library for AArch64 OHOS using a matching Linux host toolchain, both
+dual-proc-macro flags, and disabled native-library/jemalloc features. The
+Windows combination failed on proc-macro identity mismatch. Official 1.98.1
+channel manifests and HTTP checks also showed that x64 OHOS host-tool
+distributions are absent despite the platform page's host-tools wording.
+Native app-process interpretation remains unverified.

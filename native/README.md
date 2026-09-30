@@ -36,3 +36,26 @@ change any product capability flags.
 The x86_64 HarmonyOS simulator at `127.0.0.1:5555` accepted the unsigned debug
 HAP and returned the expected value on 2026-09-30. Physical-device installation
 still requires an appropriate signing profile.
+
+## Miri cross-build check
+
+`scripts/check_miri_ohos.sh` is a compile experiment for the upstream Miri
+library. It is not an app runtime. Run it on an x86_64 Linux host with GCC,
+curl, and a Miri source snapshot from Rust **1.98.1**, commit
+`48a229ceaefd4985c50990b14116b6d856af0985`:
+
+```sh
+sh scripts/check_miri_ohos.sh <Rust-source>/src/tools/miri <Rust-sysroot>/lib/rustlib/aarch64-unknown-linux-ohos
+```
+
+The second argument contains the official OHOS target's `rustc-dev` libraries
+and standard library. The script installs a separate Linux toolchain under
+`/tmp/qfli-miri-cross-1.98.1`, copies the target libraries, and enables both
+Cargo and rustc's `dual-proc-macros` mode. Miri's `native-lib` and jemalloc
+features are disabled because the upstream dependencies do not support OHOS.
+A successful library build would still need a native session adapter and HAP
+source-execution tests before the app can use it.
+
+The AArch64 OHOS library build passed in WSL on 2026-09-30. The x64 OHOS
+compiler-private libraries needed for the simulator are not present in the
+official Rust 1.98.1 distribution; that architecture needs a source bootstrap.
