@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:qfli_studio_core/models/tutorial.dart';
 import 'package:qfli_studio_core/services/project_templates.dart';
 import 'package:qfli_studio_core/store/project_store.dart';
 
@@ -22,16 +23,53 @@ class RustProjectStore extends ProjectStore {
     );
     final project = result.project;
     if (project == null || template != ProjectTemplate.rust) return result;
+    return _addCargoFiles(result);
+  }
+
+  @override
+  Future<ProjectResult> createProjectFromExample({
+    required String name,
+    required ExampleCode example,
+    String? location,
+    String? fileName,
+  }) async {
+    final result = await super.createProjectFromExample(
+      name: name,
+      example: example,
+      location: location,
+      fileName: fileName,
+    );
+    final project = result.project;
+    if (project == null || project.type != ProjectTemplate.rust.type) {
+      return result;
+    }
+    final entry = p
+        .join(
+          p.dirname(ProjectTemplate.rust.mainFile!),
+          fileName ?? p.basename(ProjectTemplate.rust.mainFile!),
+        )
+        .replaceAll('\\', '/');
+    return _addCargoFiles(result, entryFile: entry);
+  }
+
+  Future<ProjectResult> _addCargoFiles(
+    ProjectResult result, {
+    String? entryFile,
+  }) async {
+    final project = result.project!;
 
     try {
       final manifest = File(p.join(project.path, 'Cargo.toml'));
       if (!await manifest.exists()) {
         final package = cargoPackageName(project.name);
+        final binary = entryFile == null || entryFile == 'src/main.rs'
+            ? ''
+            : '\n[[bin]]\nname = "$package"\npath = ${jsonEncode(entryFile)}\n';
         await manifest.writeAsString('''[package]
 name = "$package"
 version = "0.1.0"
 edition = "2021"
-''', flush: true);
+$binary''', flush: true);
       }
 
       final ignore = File(p.join(project.path, '.gitignore'));

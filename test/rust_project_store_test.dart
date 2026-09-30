@@ -5,7 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:qfli_rust/rust_project_store.dart';
 import 'package:qfli_rust/rust_runner.dart';
+import 'package:qfli_studio_core/models/tutorial.dart';
+import 'package:qfli_studio_core/services/code_import_service.dart';
 import 'package:qfli_studio_core/services/project_templates.dart';
+import 'package:qfli_studio_core/services/runner_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +55,42 @@ void main() {
     expect(cargoPackageName('中文项目'), matches(RegExp(r'^rust_[0-9a-f]{8}$')));
     expect(cargoPackageName('项目 A'), matches(RegExp(r'^a_[0-9a-f]{8}$')));
     expect(cargoPackageName('中文项目'), isNot(cargoPackageName('其他项目')));
+  });
+
+  test('imported Rust code configures Cargo for its custom entry', () async {
+    const example = ExampleCode(
+      id: 'rust-import',
+      type: 'rust',
+      title: 'Rust example',
+      summary: 'Print a message.',
+      code: 'fn main() { println!("imported"); }',
+      output: 'imported',
+    );
+    final result = await store.createProjectFromExample(
+      name: 'Named example',
+      example: example,
+      location: workspace.path,
+      fileName: 'custom entry.rs',
+    );
+    expect(result.error, isNull);
+    final root = result.project!.path;
+    final entry = p.join(root, 'src', 'custom entry.rs');
+    expect(await File(entry).readAsString(), example.code);
+    expect(RunnerService.findEntry(root), entry);
+    expect(await File(p.join(root, 'src', 'main.rs')).exists(), isFalse);
+    final manifest = await File(p.join(root, 'Cargo.toml')).readAsString();
+    expect(manifest, contains('[[bin]]'));
+    expect(manifest, contains('path = "src/custom entry.rs"'));
+    expect(await File(p.join(root, '.gitignore')).readAsString(), '/target/\n');
+
+    final imported = await CodeImportService.importIntoProject(
+      project: result.project!,
+      example: example.copyWith(code: 'fn helper() {}'),
+      fileName: 'helper.rs',
+    );
+    expect(await File(imported.path).readAsString(), 'fn helper() {}');
+    expect(RunnerService.findEntry(root), entry);
+    expect(await File(p.join(root, 'Cargo.toml')).readAsString(), manifest);
   });
 
   test('empty projects do not receive Rust files', () async {
