@@ -2,7 +2,7 @@
 
 - [x] Pin the Rust and DevEco toolchain paths and create a reproducible OHOS
       native probe build with explicit output and ABI checks.
-- [ ] Package the probe in the app and invoke it from a device-installed HAP;
+- [x] Package the probe in the app and invoke it from a device-installed HAP;
       capture the device architecture, installation, call result and logs.
 - [ ] Pin compatible upstream rustc/Miri revisions and test an OHOS host build
       of their required crates; save exact commands and errors.
@@ -20,8 +20,9 @@
 - An OHOS target build does not pass the rustc/Miri OHOS host gate.
 - The current debug signing profile is bound to `com.azurekiln.qfli.forge`, while
   this app declares `com.azurekiln.qfli.rustcore`; signing fails with Hvigor
-  00303074. The device address also failed to reconnect on 2026-09-30. Both
-  must be resolved before a HAP loader result can be recorded.
+  00303074. The x86_64 simulator at `127.0.0.1:5555` accepts the unsigned debug
+  HAP and passed the loader/call gate. A matching profile is still needed for
+  physical-device signing.
 
 ## Risky Files
 
