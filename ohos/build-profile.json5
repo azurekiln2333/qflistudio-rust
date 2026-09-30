@@ -2,7 +2,8 @@
   "app": {
     // 签名材料来自 DevEco 的「Automatically generate signature」：
     //   C:\Users\lichengyu\.ohos\config\default_ohos_EyK2s6z...{cer,p7b,p12}
-    // 其 .p7b 绑的正是 com.azurekiln.qfli.rustcore，与本 App 的 bundleName 一致。
+    // Current local .p7b binds com.azurekiln.qfli.forge, not this app's
+    // com.azurekiln.qfli.rustcore. Generate a matching profile in DevEco.
     //
     // 关键：products[].signingConfig 这一项**必须写**。只填 signingConfigs 数组不够，
     // hvigor 不会自动挑「唯一的那一个」，缺了它只会打

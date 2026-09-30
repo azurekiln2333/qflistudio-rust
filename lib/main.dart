@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:qfli_studio_core/app.dart';
@@ -9,6 +10,7 @@ import 'package:qfli_studio_core/splash_screen.dart';
 import 'package:qfli_studio_core/store/auth_store.dart';
 import 'package:qfli_studio_core/store/settings_store.dart';
 
+import 'ohos_native_probe.dart';
 import 'rust_project_store.dart';
 import 'rust_runner.dart';
 
@@ -35,6 +37,15 @@ const StudioProfile rustProfile = StudioProfile(
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (kDebugMode && defaultTargetPlatform == TargetPlatform.ohos) {
+    try {
+      debugPrint(
+        'QFLI native ABI probe: ${verifyOhosNativeProbe().toRadixString(16)}',
+      );
+    } catch (error) {
+      debugPrint('QFLI native ABI probe failed: $error');
+    }
+  }
 
   // 在 runApp 之前定档。
   StudioProfile.current = rustProfile;

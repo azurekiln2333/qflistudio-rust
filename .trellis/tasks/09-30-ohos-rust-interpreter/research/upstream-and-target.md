@@ -18,10 +18,10 @@ Date: 2026-09-30. This is feasibility evidence, not a working app runtime.
 
 - `rust-lang/miri` is licensed MIT OR Apache-2.0 and describes itself as an interpreter for Rust MIR: https://github.com/rust-lang/miri
 - Its current `Cargo.toml` describes an experimental MIR interpreter. `src/bin/miri.rs` uses `#![feature(rustc_private)]` and imports `rustc_driver`, `rustc_interface`, `rustc_middle`, and other compiler-private crates. Source: https://raw.githubusercontent.com/rust-lang/miri/master/src/bin/miri.rs
-- Miri is therefore not a self-contained parser/compiler that can simply be cross-compiled as an OHOS `.so`. A real port must provide a compatible Rust compiler front end and MIR generation in the app process, then connect interpretation and I/O through the native bridge.
+- Miri is therefore not a self-contained parser/compiler that can simply be cross-compiled as an OHOS `.so`. A real port must provide a compatible Rust compiler front end and MIR generation in the app process, then connect interpretation and I/O through the native bridge. Official Rust 1.98.1 does provide OHOS host tools; see `rustc-host-feasibility.md` for the corrected host-tool status and Miri's separate dependency blockers.
 
 ## Next verification gates
 
 1. Load and invoke the native Rust probe from an actual HarmonyOS HAP through Dart FFI, which can call a C ABI shared library directly from this Flutter app. This proves packaging and ABI before integrating a large upstream runtime.
-2. Determine whether the required rustc private crates and Miri can be built for an OHOS *host*, not merely whether Rust programs can target OHOS. Record exact upstream versions and failures.
+2. Use the official OHOS host tools and version-matched rustc private crates to test Miri's build without its unsupported native dependencies. Record exact versions and failures.
 3. If the compiler/Miri host build is viable, port a minimal source-to-MIR-to-execution path and compare output/diagnostics with the desktop toolchain; then expand fixture coverage. Do not advertise availability before device execution passes.
