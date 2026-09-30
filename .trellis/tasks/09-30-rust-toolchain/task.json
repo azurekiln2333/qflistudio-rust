@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "09-30-desktop-rust-runtime",
-    "09-30-cargo-rust-project"
+    "09-30-cargo-rust-project",
+    "09-30-ohos-rust-interpreter"
   ],
   "parent": null,
   "relatedFiles": [],
