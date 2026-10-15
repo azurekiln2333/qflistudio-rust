@@ -78,7 +78,11 @@ Future<bool> _runRustSource(
   for (final argument in arguments) {
     if (argument == 'run' && operands.isEmpty) continue;
     if (argument.startsWith('-')) {
-      await _fail(backend, title, 'rust: 暂不支持选项：$argument（请使用 rust run <文件.rs>）');
+      await _fail(
+        backend,
+        title,
+        'rust: 暂不支持选项：$argument（请使用 rust run <文件.rs>）',
+      );
       return true;
     }
     operands.add(argument);
@@ -102,10 +106,7 @@ Future<bool> _runRustSource(
 
   // The runner validates the source/project paths and owns the title; forward
   // its result transparently so stdout/stderr/exit stay the program's own.
-  final result = await runner.run(
-    projectPath: backend.cwd,
-    entryFile: entry,
-  );
+  final result = await runner.run(projectPath: backend.cwd, entryFile: entry);
   if (result == null) return false;
   await backend.runStreams(
     title: result.title,
@@ -289,10 +290,7 @@ Future<bool> _runTool(
     // Resolve against the effective environment's PATH so a prepended
     // toolchain is honoured on Windows, where a bare name would otherwise be
     // resolved against the parent process' PATH.
-    final effectiveEnvironment = {
-      ...Platform.environment,
-      ...childEnvironment,
-    };
+    final effectiveEnvironment = {...Platform.environment, ...childEnvironment};
     process = await Process.start(
       resolveExecutableOnPath(tool, effectiveEnvironment),
       arguments,
@@ -336,16 +334,13 @@ Future<bool> _runTool(
 }
 
 /// Emits one honest failure line with [kProgramNotRunExitCode].
-Future<void> _fail(
-  SandboxShellBackend backend,
-  String title,
-  String message,
-) => backend.runStreams(
-  title: title,
-  stdout: const Stream<String>.empty(),
-  stderr: Stream<String>.value(message),
-  exitCode: Future<int>.value(kProgramNotRunExitCode),
-);
+Future<void> _fail(SandboxShellBackend backend, String title, String message) =>
+    backend.runStreams(
+      title: title,
+      stdout: const Stream<String>.empty(),
+      stderr: Stream<String>.value(message),
+      exitCode: Future<int>.value(kProgramNotRunExitCode),
+    );
 
 /// Whether a real `rustc`/`cargo` CLI can be exec-ed on this host.
 ///

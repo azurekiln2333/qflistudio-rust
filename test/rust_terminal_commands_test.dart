@@ -167,18 +167,21 @@ void main() {
       expect(out(), contains('cargo 1.98.1'));
     });
 
-    test('raw rustc compiles a source and streams the real diagnostics', () async {
-      write('main.rs', '''
+    test(
+      'raw rustc compiles a source and streams the real diagnostics',
+      () async {
+        write('main.rs', '''
 fn main() {
     let value = ;
 }
 ''');
-      chunks.clear();
-      expect(await delegate('rustc main.rs'), isTrue);
-      expect(backend.lastExitCode, isNot(0));
-      expect(backend.lastExitCode, isNot(kProgramNotRunExitCode));
-      expect(err(), contains('error'));
-    });
+        chunks.clear();
+        expect(await delegate('rustc main.rs'), isTrue);
+        expect(backend.lastExitCode, isNot(0));
+        expect(backend.lastExitCode, isNot(kProgramNotRunExitCode));
+        expect(err(), contains('error'));
+      },
+    );
 
     test(
       'raw rustc -o links with the bundled GNU fallback and the program runs',
@@ -221,18 +224,21 @@ fn main() {
       expect(out(), contains('raw-cargo-ok'));
     });
 
-    test('rust run compiles and runs a source, preserving stdout/exit', () async {
-      write('main.rs', '''
+    test(
+      'rust run compiles and runs a source, preserving stdout/exit',
+      () async {
+        write('main.rs', '''
 fn main() {
     println!("hello from rust");
     std::process::exit(7);
 }
 ''');
-      chunks.clear();
-      expect(await delegate('rust run main.rs'), isTrue);
-      expect(out(), contains('hello from rust'));
-      expect(backend.lastExitCode, 7);
-    });
+        chunks.clear();
+        expect(await delegate('rust run main.rs'), isTrue);
+        expect(out(), contains('hello from rust'));
+        expect(backend.lastExitCode, 7);
+      },
+    );
 
     test('rust run accepts the bare `rust <file>` form', () async {
       write('main2.rs', 'fn main() { println!("bare form"); }');
@@ -328,13 +334,14 @@ fn main() {
       expect(backend.lastExitCode, 0, reason: err());
     });
 
-    test('prepends --offline so --config net.offline=false cannot re-enable it',
-        () async {
-      // A fresh CARGO_HOME makes the dependency genuinely uncached, so only the
-      // prepended --offline keeps cargo from touching the registry.
-      final carcophome = Directory(p.join(directory.path, 'cargo_home'))
-        ..createSync();
-      write('Cargo.toml', '''
+    test(
+      'prepends --offline so --config net.offline=false cannot re-enable it',
+      () async {
+        // A fresh CARGO_HOME makes the dependency genuinely uncached, so only the
+        // prepended --offline keeps cargo from touching the registry.
+        final carcophome = Directory(p.join(directory.path, 'cargo_home'))
+          ..createSync();
+        write('Cargo.toml', '''
 [package]
 name = "qfli_offline_guard"
 version = "0.1.0"
@@ -343,43 +350,107 @@ edition = "2021"
 [dependencies]
 qfli_definitely_missing_crate = "9.9.9"
 ''');
-      write('src/main.rs', 'fn main() {}');
-      chunks.clear();
-      expect(
-        await rustTerminalCommandDelegate(
-          backend,
-          'cargo build --config net.offline=false',
-          offline: true,
-          environment: {
-            ...?compilerPath,
-            'CARGO_HOME': carcophome.path,
-          },
-        ),
-        isTrue,
-      );
-      expect(backend.lastExitCode, isNot(0));
-      expect(err(), contains('offline'));
-    });
+        write('src/main.rs', 'fn main() {}');
+        chunks.clear();
+        expect(
+          await rustTerminalCommandDelegate(
+            backend,
+            'cargo build --config net.offline=false',
+            offline: true,
+            environment: {...?compilerPath, 'CARGO_HOME': carcophome.path},
+          ),
+          isTrue,
+        );
+        expect(backend.lastExitCode, isNot(0));
+        expect(err(), contains('offline'));
+      },
+    );
 
-    test('RustProgramRunner sets CARGO_NET_OFFLINE for offline cargo', () async {
-      write('Cargo.toml', '''
+    test(
+      'RustProgramRunner forces offline over an explicit CARGO_NET_OFFLINE=false',
+      () async {
+        // Real regression: a host shell exporting CARGO_NET_OFFLINE=false must
+        // not re-enable the network for an offline profile. The project has a
+        // genuinely uncached dependency behind a fresh CARGO_HOME, and a
+        // conflicting .cargo/config.toml `net.offline = false`, so only the
+        // forced env value plus the prepended --offline keep cargo from
+        // updating the index.
+        final cargoHome = Directory(p.join(directory.path, 'cargo_home_off'))
+          ..createSync();
+        write('.cargo/config.toml', '[net]\noffline = false\n');
+        write('Cargo.toml', '''
 [package]
 name = "qfli_offline"
 version = "0.1.0"
 edition = "2021"
+
+[dependencies]
+qfli_definitely_missing_crate = "9.9.9"
 ''');
-      write('src/main.rs', 'fn main() { println!("offline-ok"); }');
-      final env = {...?compilerPath, 'CARGO_NET_OFFLINE': 'false'};
-      final result = await RustProgramRunner(
-        offline: true,
-        environment: env,
-      ).run(projectPath: directory.path, entryFile: p.join(directory.path, 'src/main.rs'));
-      expect(result, isNotNull);
-      final errorText = (await result!.stderr.toList()).join('\n');
-      // The runner must override the caller's false with the offline policy.
-      expect(await result.exitCode, 0, reason: errorText);
-      expect(await result.stdout.toList(), contains('offline-ok'));
-    });
+        write('src/main.rs', 'fn main() {}');
+        final result =
+            await RustProgramRunner(
+              offline: true,
+              environment: {
+                ...?compilerPath,
+                'CARGO_HOME': cargoHome.path,
+                'CARGO_NET_OFFLINE': 'false',
+              },
+            ).run(
+              projectPath: directory.path,
+              entryFile: p.join(directory.path, 'src/main.rs'),
+            );
+        expect(result, isNotNull);
+        final errors = (await result!.stderr.toList()).join('\n');
+        final output = (await result.stdout.toList()).join('\n');
+        expect(await result.exitCode, isNot(0), reason: errors);
+        // The offline policy must win: cargo refuses before touching the
+        // registry and never reports a successful index update.
+        expect(errors.toLowerCase(), contains('offline'));
+        expect(errors, isNot(contains('Updating crates.io index')));
+        expect(output, isNot(contains('Updating crates.io index')));
+      },
+    );
+
+    test(
+      'RustProgramRunner honours the environment when offline is disabled',
+      () async {
+        // The force only applies to an offline profile. With `offline: false`
+        // the caller's CARGO_NET_OFFLINE value must be respected unchanged, so
+        // an online host keeps its own policy.
+        final cargoHome = Directory(p.join(directory.path, 'cargo_home_on'))
+          ..createSync();
+        write('Cargo.toml', '''
+[package]
+name = "qfli_online"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qfli_definitely_missing_crate = "9.9.9"
+''');
+        write('src/main.rs', 'fn main() {}');
+        final result =
+            await RustProgramRunner(
+              offline: false,
+              environment: {
+                ...?compilerPath,
+                'CARGO_HOME': cargoHome.path,
+                'CARGO_NET_OFFLINE': 'true',
+              },
+            ).run(
+              projectPath: directory.path,
+              entryFile: p.join(directory.path, 'src/main.rs'),
+            );
+        expect(result, isNotNull);
+        final errors = (await result!.stderr.toList()).join('\n');
+        expect(await result.exitCode, isNot(0), reason: errors);
+        // The env variable the caller supplied is what kept cargo offline; no
+        // --offline was added and no value was forced.
+        expect(errors.toLowerCase(), contains('offline'));
+        expect(errors, isNot(contains('Updating crates.io index')));
+      },
+    );
 
     test('explicit offline=true is honoured by the rust run route', () async {
       // The delegate must pass an explicit offline policy into the runner, not
@@ -442,36 +513,40 @@ fn main() {
   });
 
   group('shared terminal delegation', () {
-    test('both terminal surfaces share one delegate through TerminalManager', () async {
-      final delegateCommands = <String>[];
-      final manager = TerminalManager()
-        ..commandDelegate = (backend, command) async {
-          delegateCommands.add(command);
-          await backend.runStreams(
-            title: command,
-            stdout: Stream<String>.value('handled: $command'),
-            stderr: const Stream<String>.empty(),
-            exitCode: Future<int>.value(0),
-          );
-          return true;
-        };
-      addTearDown(manager.dispose);
+    test(
+      'both terminal surfaces share one delegate through TerminalManager',
+      () async {
+        final delegateCommands = <String>[];
+        final manager = TerminalManager()
+          ..commandDelegate = (backend, command) async {
+            delegateCommands.add(command);
+            await backend.runStreams(
+              title: command,
+              stdout: Stream<String>.value('handled: $command'),
+              stderr: const Stream<String>.empty(),
+              exitCode: Future<int>.value(0),
+            );
+            return true;
+          };
+        addTearDown(manager.dispose);
 
-      final session = manager.create(sandboxRoot: directory.path);
-      final received = <String>[];
-      final subscription = session.backend.output.listen(
-        (chunk) => received.add(chunk.text),
-      );
-      addTearDown(subscription.cancel);
+        final session = manager.create(sandboxRoot: directory.path);
+        final received = <String>[];
+        final subscription = session.backend.output.listen(
+          (chunk) => received.add(chunk.text),
+        );
+        addTearDown(subscription.cancel);
 
-      await session.backend.execute('rust run main.rs');
-      expect(
-        delegateCommands,
-        ['rust run main.rs'],
-        reason: 'the manager must hand the Rust command to the profile delegate',
-      );
-      expect(received.join(), contains('handled: rust run main.rs'));
-    });
+        await session.backend.execute('rust run main.rs');
+        expect(
+          delegateCommands,
+          ['rust run main.rs'],
+          reason:
+              'the manager must hand the Rust command to the profile delegate',
+        );
+        expect(received.join(), contains('handled: rust run main.rs'));
+      },
+    );
 
     test(
       'the shipped rustProfile exposes a working Rust terminal delegate',
@@ -483,7 +558,8 @@ fn main() {
         expect(
           delegate,
           isNotNull,
-          reason: 'rustProfile.terminalCommandDelegate must be wired to '
+          reason:
+              'rustProfile.terminalCommandDelegate must be wired to '
               'rustTerminalCommandDelegate in lib/main.dart',
         );
         expect(await delegate!(backend, 'rust run'), isTrue);

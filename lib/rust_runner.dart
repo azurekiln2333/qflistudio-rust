@@ -155,10 +155,17 @@ class _RustRunSession {
   /// An offline product must not let Cargo reach the network: setting
   /// `CARGO_NET_OFFLINE=true` makes `cargo` itself refuse every fetch/index
   /// operation instead of silently hanging or failing with a network error.
-  /// The explicit `environment` still wins so a caller can override it.
-  Map<String, String> get _baseEnvironment => offline
-      ? {...environment, if (!environment.containsKey('CARGO_NET_OFFLINE')) 'CARGO_NET_OFFLINE': 'true'}
-      : environment;
+  ///
+  /// The value is **forced**, not merely defaulted: an inherited
+  /// `CARGO_NET_OFFLINE=false` (for example exported by the developer's shell)
+  /// used to survive the merge and re-enable the network, defeating the
+  /// profile's `offlineOnly` policy while the runner still claimed to be
+  /// offline. The runner also prepends `--offline` to every Cargo invocation so
+  /// the policy does not depend on the environment alone. An explicit
+  /// [RustProgramRunner.offline] of `false` keeps the caller's environment
+  /// untouched, so online hosts can still opt into the network.
+  Map<String, String> get _baseEnvironment =>
+      offline ? {...environment, 'CARGO_NET_OFFLINE': 'true'} : environment;
 
   Future<int> start() async {
     try {
@@ -176,7 +183,12 @@ class _RustRunSession {
         if (!plan.standalone) {
           return await _runProcess(
             cargoExecutable,
-            plan.arguments,
+            // `--offline` is a Cargo global option, so it must precede the
+            // subcommand. Prepending it makes the offline policy independent of
+            // the environment: even a conflicting `--config net.offline=false`
+            // (or an inherited CARGO_NET_OFFLINE=false) cannot re-enable the
+            // network for this invocation.
+            (offline ? ['--offline', ...plan.arguments] : plan.arguments),
             input: await _readInput(),
             processEnvironment: {
               ..._baseEnvironment,
@@ -253,6 +265,7 @@ class _RustRunSession {
     final metadataCode = await _runProcess(
       cargoExecutable,
       [
+        if (offline) '--offline',
         'metadata',
         '--no-deps',
         '--format-version',
@@ -330,12 +343,7 @@ class _RustRunSession {
   /// metadata resolution still honours Ctrl+C.
   Future<String?> _probe(String executable, List<String> arguments) async {
     final output = StringBuffer();
-    if (await _runProcess(
-          executable,
-          arguments,
-          captureStdout: output,
-        ) !=
-        0) {
+    if (await _runProcess(executable, arguments, captureStdout: output) != 0) {
       return null;
     }
     return output.toString();
@@ -458,7 +466,13 @@ Future<void> terminateRustProcessTree(Process process) async {
     }
   } else {
     try {
-      final result = await Process.run('ps', ['-A', '-o', 'pid=', '-o', 'ppid=']);
+      final result = await Process.run('ps', [
+        '-A',
+        '-o',
+        'pid=',
+        '-o',
+        'ppid=',
+      ]);
       if (result.exitCode == 0) {
         final children = <int, List<int>>{};
         for (final line in (result.stdout as String).split('\n')) {
@@ -563,10 +577,8 @@ Future<bool> hasCargoLinkerConfiguration(
 }
 
 /// Captures one compiler probe's stdout, or null when it did not succeed.
-typedef RustcProbe = Future<String?> Function(
-  String executable,
-  List<String> arguments,
-);
+typedef RustcProbe =
+    Future<String?> Function(String executable, List<String> arguments);
 
 /// The bundled Windows GNU toolchain ships `rust-lld` but no `gcc`.
 ///
@@ -587,18 +599,21 @@ Future<List<String>> resolveGnuLinkerFallbackFlags({
   bool Function()? isCancelled,
 }) async {
   if (!Platform.isWindows) return const <String>[];
-  final run = probe ??
-      (executable, arguments) =>
-          _runProbe(executable, arguments, environment);
+  final run =
+      probe ??
+      (executable, arguments) => _runProbe(executable, arguments, environment);
   final version = await run(rustcExecutable, const ['-vV']);
-  if (version == null || (isCancelled?.call() ?? false)) return const <String>[];
+  if (version == null || (isCancelled?.call() ?? false))
+    return const <String>[];
   final host = RegExp(
     r'^host: (\S+)\r?$',
     multiLine: true,
   ).firstMatch(version)?.group(1);
-  if (host == null || !host.endsWith('-pc-windows-gnu')) return const <String>[];
+  if (host == null || !host.endsWith('-pc-windows-gnu'))
+    return const <String>[];
   final sysroot = await run(rustcExecutable, const ['--print', 'sysroot']);
-  if (sysroot == null || (isCancelled?.call() ?? false)) return const <String>[];
+  if (sysroot == null || (isCancelled?.call() ?? false))
+    return const <String>[];
   final linker = p.join(
     sysroot.trim(),
     'lib',
