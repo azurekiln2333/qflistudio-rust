@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -57,7 +58,7 @@ def verify_program(source: str, path: Path, rustc: Path, timeout: float,
     binary = path / ("sample.exe" if os.name == "nt" else "sample")
     compile_result = run_command([str(rustc), "--edition=2021", "--crate-name", "curriculum_sample",
                                   str(entry), "-C", "debuginfo=0", *flags, "-o", str(binary)], path, timeout, env)
-    evidence = {"status": "failed", "compile": compile_result}
+    evidence = {"status": "failed", "sourceSha256": hashlib.sha256(source.encode("utf-8")).hexdigest(), "compile": compile_result}
     if compile_result["exitCode"] != 0:
         evidence["reason"] = "compile timeout" if compile_result["timedOut"] else "compile failed"
         return evidence
@@ -89,14 +90,26 @@ def verify_topic(topic: dict, scratch: Path, rustc: Path, cargo: Path | None,
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_text(source, encoding="utf-8")
             operation = topic.get("verify", "run")
-            command = [str(cargo), operation, "--offline", "--quiet", "--manifest-path", str(project / "Cargo.toml")]
-            execution = run_command(command, project, timeout, env)
-            passed = execution["exitCode"] == 0
-            if operation == "run":
-                passed = passed and execution["stdout"].replace("\r\n", "\n") == topic["output"].replace("\r\n", "\n")
-            result["project"] = {"status": "passed" if passed else "failed", "operation": operation, "execution": execution}
+            project_output = topic.get("projectOutput", topic["output"])
+            # Compile every supplied library/bin/test and workspace member, not
+            # merely the default bin, before accepting an attached project.
+            build_command = [str(cargo), "build", "--offline", "--quiet", "--workspace", "--all-targets", "--manifest-path", str(project / "Cargo.toml")]
+            build = run_command(build_command, project, timeout, env)
+            execution = None
+            passed = build["exitCode"] == 0
+            if passed and operation != "build":
+                command = [str(cargo), operation, "--offline", "--quiet", "--manifest-path", str(project / "Cargo.toml")]
+                if operation == "test":
+                    command.extend(["--workspace", "--all-targets"])
+                execution = run_command(command, project, timeout, env)
+                passed = execution["exitCode"] == 0
+                if operation == "run":
+                    passed = passed and execution["stdout"].replace("\r\n", "\n") == project_output.replace("\r\n", "\n")
+            result["project"] = {"status": "passed" if passed else "failed", "operation": operation,
+                                 "filesSha256": {name: hashlib.sha256(source.encode("utf-8")).hexdigest() for name, source in topic["files"].items()},
+                                 "buildAllTargets": build, "execution": execution}
             if not passed:
-                result["project"]["expectedOutput"] = topic["output"] if operation == "run" else None
+                result["project"]["expectedOutput"] = project_output if operation == "run" else None
     result["status"] = "passed" if all(result[key]["status"] == "passed" for key in ("example", "exercise", "project") if key in result) else "failed"
     return result
 
@@ -104,7 +117,9 @@ def verify_topic(topic: dict, scratch: Path, rustc: Path, cargo: Path | None,
 def write_report(path: Path | None, report: dict) -> None:
     if path is not None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
 
 
 def main() -> int:
@@ -118,10 +133,12 @@ def main() -> int:
     parser.add_argument("--structure-only", action="store_true", help="Explicitly skip execution; never produces a compiler pass")
     args = parser.parse_args()
     root = args.root.resolve()
-    report = {"schemaVersion": 1, "scope": "desktop host compilation; no mobile engine claim", "status": "failed", "results": []}
+    report = {"schemaVersion": 1, "scope": "desktop host compilation; no mobile engine claim", "status": "failed", "compilerStatus": "not_run", "results": []}
     try:
         report["catalog"] = generate(root, check=True)
         topics = load_topics(root / "tool/rust_content")
+        report["inputSha256"] = {str(path.relative_to(root)).replace("\\", "/"): hashlib.sha256(path.read_bytes()).hexdigest()
+                                 for path in sorted((root / "tool/rust_content").glob("topics_*.json"))}
         if args.structure_only:
             report.update(status="structure_only", compilerStatus="not_run", skippedPrograms=len(topics) * 2)
             write_report(args.report, report)
@@ -138,7 +155,8 @@ def main() -> int:
         report["compiler"] = run_command([str(rustc), "--version", "--verbose"], root, args.timeout, env)
         if report["compiler"]["exitCode"] != 0:
             raise ContentError("host rustc failed its version check")
-        flags: list[str] = []
+        encoded_flags = env.get("CARGO_ENCODED_RUSTFLAGS")
+        flags = (encoded_flags.split("\x1f") if encoded_flags else []) if encoded_flags is not None else env.get("RUSTFLAGS", "").split()
         if os.name == "nt" and not env.get("RUSTFLAGS") and not env.get("CARGO_ENCODED_RUSTFLAGS"):
             host = next((line.removeprefix("host: ") for line in report["compiler"]["stdout"].splitlines() if line.startswith("host: ")), "")
             if host.endswith("-pc-windows-gnu"):

@@ -1,0 +1,9 @@
+{"file":".trellis/spec/frontend/content-imports.md","reason":"Tutorial/example catalog contracts, import flow and the required Rust content-page tests"}
+{"file":".trellis/spec/backend/native-runtime.md","reason":"Honest runtime labels: what desktop rustc/cargo vs embedded Miri can actually execute; device/engine evidence required"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse the existing content model, repository interface and Python/Java generator pattern instead of new abstractions"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Decode content once at the repository boundary; one authored source of truth feeding assets, validator and tests"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/rust-content-audit.md","reason":"Measured placeholder deficiency and the Rust-local delivery seam evidence"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/source-evidence.md","reason":"Read-only code anchors for the content model, loader, pages, import path and Rust product"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/curriculum-index.md","reason":"Exact 166-lesson inventory with IDs, prerequisites, paired examples, runtime labels and import format"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/import-representation.md","reason":"Traced import call chains, single-file capability, cargo-multi create-branch bundle convention and tests"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/toolchain-discovery.md","reason":"Toolchain discovery results and which checks can run vs must be skipped"}

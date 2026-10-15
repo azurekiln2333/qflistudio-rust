@@ -117,6 +117,8 @@ def validate_topics(topics: object, *, expected_count: int = LESSON_COUNT) -> li
             raise ContentError(f"{path}.code: a complete standalone main function is required")
         if not isinstance(topic.get("output"), str):
             raise ContentError(f"{path}.output: exact stdout string is required (may be empty)")
+        if "projectOutput" in topic and not isinstance(topic["projectOutput"], str):
+            raise ContentError(f"{path}.projectOutput: expected exact Cargo stdout string")
         exercise = topic.get("exercise")
         if not isinstance(exercise, dict):
             raise ContentError(f"{path}.exercise: expected an object")
@@ -125,7 +127,7 @@ def validate_topics(topics: object, *, expected_count: int = LESSON_COUNT) -> li
         if not re.search(r"\bfn\s+main\s*\(", exercise["answer"]):
             raise ContentError(f"{path}.exercise.answer: a complete runnable program is required")
         files = topic.get("files")
-        if files is not None:
+        if "files" in topic:
             if not isinstance(files, dict) or not {"Cargo.toml", "src/main.rs"}.issubset(files):
                 raise ContentError(f"{path}.files: Cargo.toml and src/main.rs are required")
             folded: set[str] = set()
@@ -137,6 +139,17 @@ def validate_topics(topics: object, *, expected_count: int = LESSON_COUNT) -> li
                 _text(source, f"{path}.files.{filename}")
                 if filename.endswith("Cargo.toml"):
                     _validate_manifest(source, f"{path}.files.{filename}")
+            directories: dict[str, str] = {}
+            for filename in files:
+                parts = filename.split("/")
+                for index in range(1, len(parts)):
+                    directory = "/".join(parts[:index])
+                    previous = directories.get(directory.casefold())
+                    if previous is not None and previous != directory:
+                        raise ContentError(f"{path}.files: conflicting directory case {directory}")
+                    directories[directory.casefold()] = directory
+            if folded.intersection(directories):
+                raise ContentError(f"{path}.files: path is both a file and a directory")
             if files["src/main.rs"].strip() != topic["code"].strip():
                 raise ContentError(f"{path}.files.src/main.rs: must match the independently runnable code block")
             if topic.get("verify", "run") not in {"run", "build", "test"}:
@@ -207,7 +220,9 @@ def generate(root: Path = ROOT, *, check: bool = False) -> dict:
                 raise ContentError(f"{path}: missing or stale; run scripts/generate_rust_content.py")
         else:
             destination.mkdir(parents=True, exist_ok=True)
-            path.write_text(source, encoding="utf-8", newline="\n")
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(source, encoding="utf-8", newline="\n")
+            temporary.replace(path)
     return {"tutorials": len(topics), "examples": len(topics),
             "domains": dict(sorted(Counter(topic["domain"] for topic in topics).items())),
             "levels": dict(sorted(Counter(topic["level"] for topic in topics).items())),

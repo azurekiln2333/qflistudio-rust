@@ -35,6 +35,15 @@ record with checksums for the actual adapter and compiler libraries. macOS
 requires Xcode command-line tools and Python 3. Windows uses
 `scripts/build_miri_adapter.ps1` with the exact matching Windows toolchain.
 
+Windows GNU also needs a real `dlltool` when building targets that generate
+import libraries, including a proc-macro crate's workspace test harness. The
+self-contained rust-lld fallback supplies linking but does not replace that
+utility. Install matching MinGW tools, or use LLVM's `llvm-dlltool` through
+rustc's `-C dlltool=<absolute-path>` option. This workspace's final checks used
+the installed NDK 27.0.12077973 LLVM executable as `dlltool.exe` in the ignored
+isolated compiler `bin` directory. All 23 Cargo workspace/all-target builds and
+real consumer tests then passed; no test target was disabled.
+
 ### Compiler bootstrap for Android and iOS
 
 Target rust-std and the compiler browsing sources from rustc-dev cannot replace

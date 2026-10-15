@@ -1,42 +1,18 @@
-# Frontend Development Guidelines
+# Rust Application Integration Guidelines
 
-> Best practices for frontend development in this project.
+`lib/main.dart` supplies the Rust StudioProfile. The shared package owns editor,
+terminal, content pages, authentication and common tools. Rust-owned extensions
+use profile seams and must preserve shared navigation and editable source.
 
----
+| Guide | Scope |
+| --- | --- |
+| [Content Imports](./content-imports.md) | Local curriculum catalogs, complete Cargo imports, path validation and rollback |
+| [Native Runtime](../backend/native-runtime.md) | Dart FFI, asset preparation, platform identity and cancellation |
+| [Rust Run Controls](../backend/rust-run-controls.md) | Editor gestures, selected source and run titles |
+| [Rust Terminal](../backend/rust-terminal.md) | Both terminal surfaces and offline command handling |
 
-## Overview
-
-This directory contains guidelines for frontend development. Fill in each file with your project's specific conventions.
-
----
-
-## Guidelines Index
-
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | To fill |
-| [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
-| [State Management](./state-management.md) | Local state, global state, server state | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
-| [Native Runtime](../backend/native-runtime.md) | Dart FFI, asset preparation and cancellation contract | Documented |
-| [Content Imports](./content-imports.md) | Tutorial/example imports, editor selection and Rust Cargo entries | Documented |
-| [Native Startup](./native-startup.md) | OHOS progress splash and Flutter first-frame handoff | Documented |
-
----
-
-## How to Fill These Guidelines
-
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
-
----
-
-**Language**: All documentation should be written in **English**.
+Run Dart analysis, canonical formatting and root Flutter tests before a code
+commit. Catalog changes also require generation drift checks, actual compilation
+of every main/answer and full offline Cargo bundle checks. Shared-core fixes
+must be coordinated with their current owner; never patch another product's UI
+or catalog from this repository.

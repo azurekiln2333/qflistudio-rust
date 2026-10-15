@@ -1,62 +1,43 @@
-# Curriculum A — round-4 completion report (FINAL, freeze)
+# Curriculum A — round-6 exact-defect report (freeze candidate)
 
 Agent: rust-curriculum-a. Working dir: D:/MyNewProjects/qfli_rust.
 
 ## Owned artifact + FINAL blob hash
 
 - `tool/rust_content/topics_001_084.json`
-- **FINAL git worktree blob hash: `c193d466d69c39e770689a97e74df676b54c3032`**
-- `git diff --numstat` vs HEAD: 42 insertions / 41 deletions (rounds 1–4)
+- **FINAL git worktree blob hash: `abd15ee20fa7a290f13fd112e8b1ab78c345755b`**
+- `git diff --numstat` vs HEAD (`dc2becf`): 10 insertions / 10 deletions.
+- Only lesson IDs changed within this round: **57 and 68**. IDs 55/62/64 keep the
+  already-accepted round-5 content; no other IDs touched.
 
-No staging / no commit (root owns). No shared-core, main.dart, pubspec.yaml,
-branch switch, or sibling repo touched. `tool/rust_content/` now contains only
-the two JSON files (`topics_001_084.json` mine, `topics_085_166.json` sibling's).
+No Flutter run, no Git staging/commit (root owns).
 
-## What round 4 had missed, now fixed
+## Reviewer final-2 exact defects fixed
 
-1. **079 MAIN `code`** (the real bug) — it still had `struct UserId(u64)` and
-   `impl From<&str> for UserId { UserId(value.len() as u64) }`, printing
-   `id = UserId(4)`, contradicting the corrected lossless text. Replaced with a
-   genuinely lossless `struct UserId(String)`:
-   - `impl From<String> for UserId` and `impl From<&str> for UserId` preserve the
-     entire text (no `len()`, no truncation);
-   - `assert_eq!`/`assert_ne!` prove the round-trip and that two **same-length,
-     different-text** ids (`"abcd"` vs `"wxyz"`) remain distinct;
-   - `Percentage` keeps the `TryFrom<i64>` range-validated conversion;
-   - `output` recomputed from a real run (no more `UserId(4)`).
-   079 is `desktop`, so there is no bundled `src/main.rs` to mirror.
+1. **057 exercise answer** — the prompt requires whole tens (including the F band)
+   to carry a "(整十)" suffix, but `0..=59` had no guard, so `bucket(0)`,
+   `bucket(10)`, `bucket(50)` returned `"F"`. Added an
+   `s @ 0..=59 if s % 10 == 0 => "F(整十)"` branch (guards + `@` both used), and
+   `assert_eq!` covering `bucket(0)/bucket(10)/bucket(50)` → `"F(整十)"` and the
+   non-round `bucket(55)` → `"F"`.
 
-2. **081 exercise `answer` comment** — deleted the wrong line
-   "PartialEq 必须是等价关系：自反、对称、传递。" It now reads the correct
-   contract: PartialEq requires **symmetry + transitivity** (reflexivity is
-   `Eq`'s additional requirement), with the `to_bits` bit-equality choice noted.
+2. **068 exercise answer** — `enum Command` had only `Set`/`Del` and `parse` had
+   no `quit` arm, contradicting the prompt ("quit must reject extra args").
+   Added `Command::Quit` plus a `"quit"` arm: zero args → `Ok(Command::Quit)`;
+   extra args → `Err(ParseError::MissingArgs { command: "quit", expected: 0, got })`.
+   Added asserts for `quit`, `quit now`, and the set/del legal+illegal cases.
 
-3. **048 explain first sentence** — now clarifies `set`/`replace`/`into_inner`
-   work for any `T`, **`take` requires `T: Default`** (leaves `T::default()`),
-   and only `get` requires `T: Copy`.
+Both changes are in the **answer field (actual code)**, not explain-only.
 
-## Targeted self-verify (real compiler; no full-84 rerun, per instruction)
+## Targeted self-verify (real rustc, 10 s child timeouts)
 
 - `_build.py`: 84 lessons, ids 1..84 — OK.
-- `_audit.py`: schema / uniqueness / filler ban / `files['src/main.rs']==code` /
-  projectOutput / verify — all pass.
-- 10-point assertion for 048/079/081 (fields, not just explain) — **all PASS**.
-- Real compile+run of lessons 48, 79, 81 (`code` and `exercise.answer`) — **0
-  failures**; 079 `code` stdout equals `output` exactly.
-- Earlier round 1–3 fixes re-checked present — all True.
-
-## Scratch helpers relocated (no deletions of other files)
-
-Moved all authoring/validation helpers from `tool/rust_content/` to
-`build/content-author-scratch/`:
-`_a1/_a2/_b1/_b2/_c1/_c2/_c3/_d1/_d2/_e1/_e2.py`, `_build.py`, `_validate.py`,
-`_audit.py`, `_fixquotes.py`, `_patch_r4b.py`, `_check_r4b.py`,
-`_check_r4b_run.py`, `_scratch079.rs/.exe`.
-
-`build/content-author-scratch/` is **gitignored** (`**/build/`) and inside the
-Rust repo. `_build.py`/`_validate.py`/`_audit.py` were repointed to read/write the
-canonical `tool/rust_content/topics_001_084.json`. `topics_085_166.json` was not
-touched.
+- `_audit.py`: all convention/integrity checks pass.
+- Real compile+run of lessons 57 and 68 (`code` and `exercise.answer`) with 10 s
+  timeouts: **0 failures**; 068's `code` stdout equals `output` exactly.
+- 6-point field assertion: 057 has the F(整十) branch + 0/10/50/55 asserts; 068
+  has `Command::Quit`, zero-arg success, and extra-arg rejection — **all PASS**.
+- `git diff` within this round touches only IDs 57 and 68 (vs round-5 state).
 
 ## Request
 
@@ -64,7 +45,6 @@ Commit ONLY:
 - `tool/rust_content/topics_001_084.json`
 - `.trellis/tasks/10-12-rust-curriculum-100/research/curriculum-a.md`
 
-Suggested message: `fix(content): correct lessons 006/012/015/048/049/079/081 and earlier review findings`
+Suggested message: `fix(content): complete 057 whole-ten buckets and 068 quit arity`
 
-**FREEZE**: this content is frozen pending root review; I will make no further
-edits unless a new defect is reported.
+**FREEZE**: no further edits unless a new defect is reported.

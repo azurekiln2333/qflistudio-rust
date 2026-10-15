@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:qfli_rust/main.dart' show rustProfile;
+import 'package:qfli_rust/rust_content_repository.dart';
 import 'package:qfli_rust/rust_project_store.dart';
 import 'package:qfli_studio_core/content/content_repository.dart';
 import 'package:qfli_studio_core/editor/editor_fonts.dart';
@@ -38,12 +39,14 @@ void main() {
         .toFilePath();
     catalog = ContentCatalog.fromJson(
       tutorialsSource: await File(
-        p.join(directory, 'assets/content/tutorials.json'),
+        RustContentRepository.tutorialAsset,
       ).readAsString(),
       examplesSource: await File(
-        p.join(directory, 'assets/content/examples.json'),
+        RustContentRepository.exampleAsset,
       ).readAsString(),
     );
+    expect(catalog.tutorials, hasLength(166));
+    expect(catalog.examples, hasLength(166));
     if (Platform.environment['QFLI_UI_SCREENSHOTS'] != null) {
       final flutter = packages.cast<Map>().singleWhere(
         (package) => package['name'] == 'flutter',
@@ -145,7 +148,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text(title), findsOneWidget);
+        final contentRow = find.widgetWithText(ListTile, title);
+        expect(contentRow, findsOneWidget);
         expect(find.byType(CodeSnippet), findsNothing);
         expect(find.byType(SelectableText), findsNothing);
         expect(
@@ -155,7 +159,7 @@ void main() {
         expect(tester.takeException(), isNull);
         await _capture(tester, boundary, '$page-$width-catalog');
 
-        await tester.tap(find.text(title));
+        await tester.tap(contentRow);
         await tester.pumpAndSettle();
         expect(find.byType(CodeSnippet), findsOneWidget);
         final l10n = StudioLocalizations.of(

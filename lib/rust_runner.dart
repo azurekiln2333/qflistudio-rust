@@ -603,17 +603,20 @@ Future<List<String>> resolveGnuLinkerFallbackFlags({
       probe ??
       (executable, arguments) => _runProbe(executable, arguments, environment);
   final version = await run(rustcExecutable, const ['-vV']);
-  if (version == null || (isCancelled?.call() ?? false))
+  if (version == null || (isCancelled?.call() ?? false)) {
     return const <String>[];
+  }
   final host = RegExp(
     r'^host: (\S+)\r?$',
     multiLine: true,
   ).firstMatch(version)?.group(1);
-  if (host == null || !host.endsWith('-pc-windows-gnu'))
+  if (host == null || !host.endsWith('-pc-windows-gnu')) {
     return const <String>[];
+  }
   final sysroot = await run(rustcExecutable, const ['--print', 'sysroot']);
-  if (sysroot == null || (isCancelled?.call() ?? false))
+  if (sysroot == null || (isCancelled?.call() ?? false)) {
     return const <String>[];
+  }
   final linker = p.join(
     sysroot.trim(),
     'lib',

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:ffi';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +14,7 @@ import 'package:qfli_studio_core/store/auth_store.dart';
 import 'package:qfli_studio_core/store/settings_store.dart';
 
 import 'ohos_native_probe.dart';
+import 'rust_content_repository.dart';
 import 'rust_project_store.dart';
 import 'rust_runner.dart';
 import 'rust_terminal_commands.dart';
@@ -22,17 +25,22 @@ const String _appTitle = StudioProductCatalog.rustCore;
 /// Rust 版档位：同一套内核 UI，收窄成只服务 Rust。
 ///
 /// 单独提出来是为了让测试能直接断言档位，而不必为了一个常量去跑 `main()`。
-const StudioProfile rustProfile = StudioProfile(
+final StudioProfile rustProfile = StudioProfile(
   id: 'rust',
   appTitle: _appTitle,
   templates: [ProjectTemplate.empty, ProjectTemplate.rust],
   isOffline: true,
   runner: RustProgramRunner(),
   terminalCommandDelegate: rustTerminalCommandDelegate,
+  contentRepositoryFactory: RustContentRepository.new,
   productKey: StudioProductCatalog.rustCoreKey,
   showHomeTabs: false,
-  runtimeKind: 'Rust 工具链',
-  runtimeStatus: 'unavailable',
+  runtimeKind: Platform.isAndroid ? 'rustc-miri' : 'Rust 工具链',
+  runtimeStatus:
+      Platform.isAndroid &&
+          (Abi.current() == Abi.androidX64 || Abi.current() == Abi.androidArm64)
+      ? 'available'
+      : 'unavailable',
   supportedFileExtensions: ['.rs'],
   // main.rs 排在默认入口表前面，保证本版一定先命中它。
   entryFileNames: ['main.rs', 'src/main.rs'],

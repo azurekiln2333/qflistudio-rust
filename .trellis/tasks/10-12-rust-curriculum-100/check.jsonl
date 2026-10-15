@@ -1,0 +1,8 @@
+{"file":".trellis/spec/frontend/content-imports.md","reason":"Verify catalog/detail/import regression and mobile/desktop content-page bounds"}
+{"file":".trellis/spec/backend/native-runtime.md","reason":"Verify runtime labels match real desktop/Miri capability; skipped != passed; no label from absence of crates alone"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify assets, validator, repository and tests agree on one content contract"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/verification-plan.md","reason":"Acceptance gates, integrity checks and honest-skip reporting for the Rust curriculum"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/source-evidence.md","reason":"Code anchors behind the verification claims and the traced import paths"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/curriculum-index.md","reason":"Expected counts, ID continuity (001..166) and domain coverage to assert against the emitted assets"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/import-representation.md","reason":"Expected single-file and cargo-multi import behavior to assert in regression tests"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/toolchain-discovery.md","reason":"Which compile/run checks are expected to run vs be reported as skipped"}

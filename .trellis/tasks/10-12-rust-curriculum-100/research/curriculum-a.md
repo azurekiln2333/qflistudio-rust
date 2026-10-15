@@ -220,6 +220,52 @@ All authoring/validation helpers (`_a*.*`, `_b*.*`, `_c*.*`, `_d*.*`, `_e1.py`,
 `_build.py`/`_validate.py`/`_audit.py` were repointed so they read/write the
 canonical `tool/rust_content/topics_001_084.json`.
 
+## Cross-review fixes (round 5 — final alignment)
+
+055/057/062/064/068 answers or prompts were not aligned with their stated tasks:
+
+1. **055** exercise `answer` — prompt asked for `struct Task` but the answer only
+   had a free `transition(status, action)` fn. Rewrote to define `struct Task`
+   with `Task::new` and a `transition(&mut self, action)` method that mutates
+   `status`, then demos a legal transition, an archive, and a rejected re-open.
+2. **057** exercise — prompt asked for guards **and** `@`; the answer only used
+   `@`. Answer now uses `@` bindings plus an `if s % 10 == 0` guard (whole tens
+   get a "(整十)" suffix), and the prompt describes that behaviour.
+3. **062** exercise `answer` — prompt asked for an explicit `ref`; the answer
+   used implicit binding. Now binds `Some((ref name, ref age))` explicitly.
+4. **064** exercise — prompt asked for explicit `Outside/InWord/InNumber` states
+   but the answer used a `bool` and split `a1` ambiguously. Rewrote with an
+   `enum State { Outside, InWord, InNumber }` scanner; the prompt now states the
+   grammar explicitly, including that `a1` splits into `word:a` then `number:1`.
+5. **068** — `quit` ignored extra args and the prompt said `set k v` is
+   "三个参数". Lesson `code` now rejects `quit now` (expected 0 args) and only
+   `quit` is accepted; output updated from a real run. The exercise prompt now
+   says `set` needs **two arguments after the command name**; the answer rejects
+   `del a b` too.
+
+Targeted re-verify (10 s child timeouts, no Flutter, no staging): `_build.py` OK,
+`_audit.py` all pass; lessons 55/57/62/64/68 compile+run (code and answer) with
+0 failures and 068's code stdout matching `output`; 14-point alignment assertion
+all PASS; diff vs HEAD touches exactly IDs 55/57/62/64/68 (frozen blessings
+preserved).
+
+## Cross-review fixes (round 6 — reviewer final-2 exact defects)
+
+1. **057** answer — the prompt's blanket clause "当分数是整十时返回带（整十）后缀的等级"
+   was not honoured for the F band: `0..=59` had no guard, so `bucket(0/10/50)`
+   returned `"F"`. Added an `s @ 0..=59 if s % 10 == 0 => "F(整十)"` branch and
+   `assert_eq!` for 0/10/50 (→ F(整十)) and non-round 55 (→ F).
+2. **068** answer — `enum Command` only had `Set`/`Del` and `parse` had no `quit`
+   handling, contradicting the prompt's "quit rejects extra args". Added
+   `Command::Quit`, a `"quit"` arm that succeeds on zero args and returns
+   `MissingArgs { expected: 0 }` on extras, and asserts for `quit`/
+   `quit now` plus the set/del cases.
+
+Targeted re-verify (10 s child timeouts): 057 and 068 compile+run (code and
+answer) with 0 failures; 068's code stdout equals `output`; 6-point field
+assertion all PASS; diff vs HEAD within this round changes only IDs 57 and 68
+against the round-5 state (55/62/64 accepted, untouched).
+
 ## Validation performed locally (real compiler)
 
 `native/build/miri-windows/compiler/bin/rustc.exe` 1.98.1 was used:

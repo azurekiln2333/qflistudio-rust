@@ -4,9 +4,10 @@ from copy import deepcopy
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from generate_rust_content import ContentError, build_documents, validate_topics
-from verify_rust_content import run_command
+from verify_rust_content import run_command, verify_topic
 
 
 def topic(number: int = 1) -> dict:
@@ -72,6 +73,45 @@ class ContentContractTests(unittest.TestCase):
         network["files"]["Cargo.toml"] += '\n[dependencies]\nremote="1"\n'
         with self.assertRaisesRegex(ContentError, "only bundled path dependencies"):
             validate_topics([network], expected_count=1)
+
+    def test_cargo_project_output_is_distinct_from_standalone_stdout(self):
+        record = topic()
+        record["files"] = {
+            "Cargo.toml": '[package]\nname="sample"\nversion="0.1.0"\n',
+            "src/main.rs": record["code"],
+        }
+        record["projectOutput"] = "cargo-specific stdout\n"
+        validate_topics([record], expected_count=1)
+        invalid = deepcopy(record)
+        invalid["projectOutput"] = 7
+        with self.assertRaisesRegex(ContentError, "projectOutput"):
+            validate_topics([invalid], expected_count=1)
+        for stdout, status in (("cargo-specific stdout\n", "passed"), (record["output"], "failed")):
+            with tempfile.TemporaryDirectory() as directory:
+                with patch("verify_rust_content.verify_program", return_value={"status": "passed"}):
+                    with patch("verify_rust_content.run_command", side_effect=[
+                        {"exitCode": 0, "stdout": ""}, {"exitCode": 0, "stdout": stdout}
+                    ]) as command:
+                        result = verify_topic(record, Path(directory), Path("rustc"), Path("cargo"), 1, {}, [])
+                self.assertEqual(result["project"]["status"], status)
+                self.assertIn("--offline", command.call_args.args[0])
+
+    def test_rejects_null_bundles_and_file_directory_aliases(self):
+        record = topic()
+        record['files'] = None
+        with self.assertRaises(ContentError):
+            validate_topics([record], expected_count=1)
+        files = {
+            'Cargo.toml': '[package]\nname="sample"\nversion="0.1.0"\n',
+            'src/main.rs': record['code'],
+        }
+        for extra in (
+            {'src/conflict': 'file', 'src/conflict/child.rs': 'file'},
+            {'src/Foo/a.rs': 'file', 'src/foo/b.rs': 'file'},
+        ):
+            record['files'] = dict(files, **extra)
+            with self.assertRaises(ContentError):
+                validate_topics([record], expected_count=1)
 
     def test_process_failures_and_timeouts_do_not_become_passes(self):
         import os

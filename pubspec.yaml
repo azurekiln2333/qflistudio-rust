@@ -23,6 +23,9 @@ dependency_overrides:
     path: ../qfli_studio_core/vendor/re_editor
 
 dev_dependencies:
+  integration_test:
+    sdk: flutter
+  re_editor: ^0.10.0
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
@@ -32,3 +35,4 @@ flutter:
   assets:
     - assets/app_icon.png
     - assets/miri/
+    - assets/content_rust/
