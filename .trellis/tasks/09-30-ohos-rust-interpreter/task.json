@@ -21,6 +21,11 @@
   "children": [],
   "parent": "09-30-rust-toolchain",
   "relatedFiles": [],
-  "notes": "",
-  "meta": {}
+  "notes": "2026-10-15 matching pinned ARM64 adapter rebuilt and unsigned ARM64 release HAP built. Final package checksum-preservation fix/build is recorded in release-readiness platform-builds.md. Device unsigned install returns9568320/no signature file; shell execution denied126. Matching Rust signing profile absent. Keep runtimeStatus unavailable until actual packaged source execution is verified.",
+  "meta": {
+    "native_build": "passed",
+    "unsigned_hap_build": "passed",
+    "signed_install": "blocked_missing_rust_profile",
+    "source_execution": "not_verified"
+  }
 }

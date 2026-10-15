@@ -3,7 +3,7 @@
   "name": "rust-toolchain",
   "title": "Rust interpreter and compiler toolchain",
   "description": "Deliver verified Rust interpretation, compilation, execution and practical Rust tooling across supported platforms",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -21,10 +21,11 @@
   "children": [
     "09-30-desktop-rust-runtime",
     "09-30-cargo-rust-project",
-    "09-30-ohos-rust-interpreter"
+    "09-30-ohos-rust-interpreter",
+    "10-01-cross-platform-rust-runtime"
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "2026-10-15 release work committed terminal integration, offline policy, native packaging and verified curriculum. Host compiler and both mobile architecture packages exist. Remaining full-runtime acceptance depends on matching OHOS signing/device execution and Windows native adapter/sysroot execution; do not equate source/package builds with every platform runtime being verified.",
   "meta": {}
 }

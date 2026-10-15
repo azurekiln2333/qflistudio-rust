@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/native-runtime.md","reason":"Preserve pinned compiler identity, C session ABI, native lifetimes and truthful validation."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Keep native host selection, manifests, package paths and Dart FFI consistent."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Generalize the existing OHOS session implementation instead of duplicating platform runners."}

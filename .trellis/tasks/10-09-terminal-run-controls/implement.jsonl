@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/native-runtime.md","reason":"Preserve runtime ABI, execution routing, cancellation and native validation limits"}
+{"file":".trellis/spec/frontend/content-imports.md","reason":"Preserve configured Cargo entry and current editor selection contracts"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace entry selection through editor, runner and terminal; decode metadata at one boundary"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse process lifecycle and terminal implementation; avoid duplicated parsers"}
+{"file":".trellis/tasks/10-09-terminal-run-controls/research/integration-audit.md","reason":"Source audit, ownership boundary, gaps and validation environment"}
+{"file":".trellis/spec/backend/rust-run-controls.md","reason":"Executable current-file selection, title, cancellation and validation contract"}

@@ -98,3 +98,30 @@ root suite with the real pinned compiler and complete GNU tools: **140 passed,
 regressions and all 23 custom-name Cargo bundle builds. Final whole-tree Dart
 analysis passed and formatting required no changes. The final corpus verifier
 passed all 166 lessons / 332 programs / 23 Cargo projects at recorded hashes.
+
+## Final handoff audit
+
+Read-only evidence audit after commit `5384d29` confirms that the committed
+`curriculum-verification.json` parses to the same report as the working copy
+(raw bytes differ only through Git line-ending conversion). Both authored input
+file SHA-256 values match. All 332 exact main/answer source hashes and all 23
+complete project file-hash maps match the current committed source inputs.
+Recorded main, explicitly specified exercise, and Cargo-run stdout match their
+authored expectations. All 708 recorded compiler/build/run process results have
+exit zero and no timeout; every full-project build includes `--offline`,
+`--workspace` and `--all-targets`. Both generated catalogs contain 166 entries.
+
+`build/release-final-tests.log` ends with `+140 ~8: All tests passed!`; its eight
+explicit skips all belong to `native_miri_integration_test.dart` and report a
+missing matching Windows native library/sysroot. The startup test's diagnostic
+about an unavailable OHOS native probe on the Windows host is not a device pass
+and does not change that successful unit/widget result.
+
+Curriculum and terminal child-task completion metadata agrees with those
+validated deliverables. The broad toolchain/cross-platform/OHOS runtime tasks
+correctly retain unfinished signing or target execution requirements. The
+platform report still labels its earlier APK/HAP as baseline and awaits final
+integrated rebuild evidence; final artifact hashes/checksum validation and
+production signing must remain separate gates until the platform owner hands
+them back. No additional integration blocker was found. This audit ran no
+Flutter/Dart command, device action, sibling write or Git mutation.

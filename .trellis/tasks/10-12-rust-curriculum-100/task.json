@@ -3,7 +3,7 @@
   "name": "rust-curriculum-100",
   "title": "Replace placeholder Rust tutorials with 100+ complete lessons and examples",
   "description": "Delegate to Herdr Pi to build a substantive Rust curriculum from beginner to advanced, with runnable examples and verified in-app integration.",
-  "status": "planning",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,16 +11,23 @@
   "creator": "lichengyu",
   "assignee": "lichengyu",
   "createdAt": "2026-10-12",
-  "completedAt": null,
+  "completedAt": "2026-10-15",
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "5384d29",
   "pr_url": null,
   "subtasks": [],
   "children": [],
   "parent": "10-15-rust-release-readiness",
   "relatedFiles": [],
-  "notes": "",
-  "meta": {}
+  "notes": "Completed with 166 substantive lessons/examples, final semantic review, 332 real program passes, 23 offline Cargo workspace/all-target projects, final Flutter140 pass/8 Windows-native skips/0 failures. Evidence: ../10-15-rust-release-readiness/research/content-integration.md and curriculum-verification.json.",
+  "meta": {
+    "implementation": "complete",
+    "quality_check": "passed",
+    "tutorials": 166,
+    "examples": 166,
+    "programsPassed": 332,
+    "cargoProjectsPassed": 23
+  }
 }

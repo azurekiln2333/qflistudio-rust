@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/native-runtime.md","reason":"Check native ABI, source pinning, dependency matches and actual source execution evidence."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit host/architecture selection, packaged native binaries and guest assets end to end."}
