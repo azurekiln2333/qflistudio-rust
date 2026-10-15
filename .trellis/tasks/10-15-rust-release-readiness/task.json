@@ -18,7 +18,10 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "10-12-rust-curriculum-100",
+    "10-09-terminal-run-controls"
+  ],
   "parent": null,
   "relatedFiles": [],
   "notes": "",

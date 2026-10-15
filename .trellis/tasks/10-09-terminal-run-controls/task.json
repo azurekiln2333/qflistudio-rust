@@ -1,0 +1,42 @@
+{
+  "id": "terminal-run-controls",
+  "name": "terminal-run-controls",
+  "title": "Unify QFLI terminal and run controls",
+  "description": "Audit Java and shared core changes, make terminal output continuous, and verify project tap versus current-file long press.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lichengyu",
+  "assignee": "lichengyu",
+  "createdAt": "2026-10-09",
+  "completedAt": null,
+  "branch": "main",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "10-15-rust-release-readiness",
+  "relatedFiles": [
+    "lib/rust_runner.dart",
+    "lib/native_miri_runner.dart",
+    "lib/cargo_targets.dart",
+    "lib/rust_run_title.dart",
+    "test/rust_app_test.dart",
+    "test/cargo_targets_test.dart",
+    "test/cargo_process_wiring_test.dart",
+    "test/rust_editor_run_test.dart"
+  ],
+  "notes": "Implementation and final quality verification complete. The user explicitly chose to keep all changes uncommitted on 2026-10-09. Do not stage, commit, or run auto-committing archive/journal helpers. Pi implemented in Herdr wB:p2; independent review and coordinator verification passed. See research/final-verification.md and task-only.patch. Retain this task for later integration with the pre-existing uncommitted Rust runtime work; do not repeat completed implementation.",
+  "meta": {
+    "implementation": "complete",
+    "quality_check": "passed",
+    "commit": "deferred_by_user",
+    "implementation_agent": "pi-rust-terminal",
+    "herdr_pane": "wB:p2",
+    "evidence": "research/final-verification.md"
+  }
+}
