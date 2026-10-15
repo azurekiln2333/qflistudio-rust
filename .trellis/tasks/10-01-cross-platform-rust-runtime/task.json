@@ -21,6 +21,6 @@
   "children": [],
   "parent": "09-30-rust-toolchain",
   "relatedFiles": [],
-  "notes": "2026-10-15 source/build/package integration committed0649363 and Dart dependenciesc2bc7b9; real desktop rustc/Cargo tests pass. Android ARM64 six-case device suite and x64 API37/16KiB seven-case suite passed. OHOS unsigned build passed but device signing/execution remains blocked. Windows native adapter/sysroot absent (8 explicit root-suite skips); Apple build host unavailable. This broad task remains open for those exact remaining execution targets.",
+  "notes": "2026-10-15 source/build/package integration committed0649363 and Dart dependenciesc2bc7b9; real desktop rustc/Cargo tests pass. Final Android ARM64 physical and x64 API37/16KiB native/editor/terminal suites passed7/7 each; both final release package audits/builds pass. OHOS unsigned build passed but device signing/execution remains blocked. Windows native adapter/sysroot absent (8 explicit root-suite skips); Apple build host unavailable. This broad task remains open for those exact remaining execution targets.",
   "meta": {}
 }

@@ -15,7 +15,7 @@
   "branch": "main",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "ca6853e",
   "pr_url": null,
   "subtasks": [],
   "children": [
@@ -23,7 +23,55 @@
     "10-09-terminal-run-controls"
   ],
   "parent": null,
-  "relatedFiles": [],
-  "notes": "",
-  "meta": {}
+  "relatedFiles": [
+    "lib/main.dart",
+    "lib/rust_terminal_commands.dart",
+    "lib/rust_runner.dart",
+    "lib/native_miri_runner.dart",
+    "lib/rust_content_repository.dart",
+    "lib/rust_project_store.dart",
+    "integration_test/rust_native_test.dart",
+    "ohos/entry/build-profile.json5",
+    ".trellis/tasks/10-15-rust-release-readiness/research/release-verification.md"
+  ],
+  "notes": "2026-10-15 all Rust-owned terminal, offline, curriculum and packaging changes verified/committed. Final Android ARM64 and API37 x64/16KiB native/editor/terminal suites7/7 each pass; final APK and unsigned ARM64 HAP build/catalog/native byte audits pass. Readiness remains open for production Android signing and matching Rust OHOS signing plus actual packaged source execution; broad Windows/Apple native targets remain in the cross-platform task. See research/release-verification.md and platform-builds.md.",
+  "meta": {
+    "tutorials": 166,
+    "examples": 166,
+    "programsPassed": 332,
+    "cargoProjectsPassed": 23,
+    "rootTests": {
+      "passed": 140,
+      "skipped": 8,
+      "failed": 0,
+      "skipReason": "Windows native Miri adapter/sysroot absent"
+    },
+    "pythonTestsPassed": 13,
+    "sharedCoreTestsPassed": 102,
+    "sharedCoreRevision": "8b33443",
+    "androidArm64NativeTestsPassed": 7,
+    "androidX64NativeTestsPassed": 7,
+    "androidBuild": "passed",
+    "ohosUnsignedBuild": "passed",
+    "releaseBlockers": [
+      "Android production signing certificate",
+      "Rust-matching OHOS signing profile and signed packaged source execution"
+    ],
+    "platformCommit": "ca6853e",
+    "evidenceCommit": "08c2605",
+    "deviceHandoff": "OPD2413 explicitly released to Go coordinator in global seq56; emulator5580/private ADB5039 stopped only",
+    "artifacts": {
+      "android": {
+        "path": "build/app-release-final.apk",
+        "bytes": 154284485,
+        "sha256": "b54ccc9430dc6b5e3c2ce4ddad9a232b2b4dc5b71c2180cdcb04b1890f5ca2d8"
+      },
+      "ohos": {
+        "path": "build/ohos/hap/entry-default-unsigned.hap",
+        "bytes": 638135918,
+        "sha256": "bc64d9f1d721a7d75a391f13a0ea1a568586aec34341643736775bf97e7ae780",
+        "signed": false
+      }
+    }
+  }
 }

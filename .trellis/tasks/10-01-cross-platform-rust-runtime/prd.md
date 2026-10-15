@@ -38,8 +38,8 @@ Reuse the upstream Rust compiler and Miri C ABI on native Flutter platforms, pre
 ## Notes
 
 - Current 2026-10-15 evidence supersedes the historical environment notes below:
-  real Windows rustc/Cargo execution, Android ARM64 six-case and x64 seven-case
-  native execution pass. Pinned OHOS ARM64 libraries and unsigned HAP build pass;
+  real Windows rustc/Cargo execution, final Android ARM64 and x64 seven-case
+  native execution pass (7/7 each). Pinned OHOS ARM64 libraries and unsigned HAP build pass;
   signed packaged source execution remains blocked. Windows native Miri and
   Apple-host execution remain unverified, so their broad acceptance stays open.
   Current user authorization includes available OHOS device checks and commits.

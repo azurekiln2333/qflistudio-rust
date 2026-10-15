@@ -1,0 +1,67 @@
+{
+  "artifact": "build\\ohos\\hap\\entry-default-unsigned.hap",
+  "bytes": 638135918,
+  "sha256": "bc64d9f1d721a7d75a391f13a0ea1a568586aec34341643736775bf97e7ae780",
+  "configRestoredSha256": "17580932075c994635cdb2e9c6ad65bb3d80dc798a96cbeabd16f549a49ed819",
+  "catalogs": {
+    "tutorials": {
+      "count": 166,
+      "sha256": "f736dfd39b1813de61f9a0632c0aaefa46a329dcbbad1b41c44d7a4ad50010e6",
+      "matchesFinalSource": true
+    },
+    "examples": {
+      "count": 166,
+      "sha256": "55647a17a464807969ebfeca84a2afea1773cc3b5f457b1a47656d26a730428d",
+      "matchesFinalSource": true
+    }
+  },
+  "manifest": {
+    "schema": 1,
+    "nativeHost": "aarch64-unknown-linux-ohos",
+    "guestTarget": "x86_64-unknown-linux-gnu",
+    "rustCommit": "48a229ceaefd4985c50990b14116b6d856af0985",
+    "verifiedAssetCount": 97
+  },
+  "nativeLibraries": [
+    {
+      "member": "libs/arm64-v8a/libqfli_miri.so",
+      "bytes": 16002848,
+      "sha256": "d409527a6c5bba8c203fea862db98a16441429bfcff550c7407ecd16c40fd60b",
+      "manifestMatches": true
+    },
+    {
+      "member": "libs/arm64-v8a/librustc_driver-2224b02d479e9414.so",
+      "bytes": 282735328,
+      "sha256": "acf961fdd527e1ccc8a503c5874af3038dd1de00079c0626fdbfcc024997dcc8",
+      "manifestMatches": true
+    },
+    {
+      "member": "libs/arm64-v8a/libc++_shared.so",
+      "bytes": 1262248,
+      "sha256": "d1a368b58e7cb80a7422b8bd344ec9328a43884d62f409af6e9ec161c73a2f4d",
+      "manifestMatches": true
+    }
+  ],
+  "arm64FlutterAppEngine": true,
+  "bundleName": "com.azurekiln.qfli.rustcore",
+  "clientIdAbsent": true,
+  "unusedX64NativeMembers": [
+    {
+      "member": "libs/x86_64/libqfli_miri.so",
+      "bytes": 16083560
+    },
+    {
+      "member": "libs/x86_64/libqfli_native_probe.so",
+      "bytes": 348928
+    },
+    {
+      "member": "libs/x86_64/librustc_codegen_cranelift-1.98.1.so",
+      "bytes": 15807056
+    },
+    {
+      "member": "libs/x86_64/librustc_driver-2223f3b215a042ae.so",
+      "bytes": 139920288
+    }
+  ],
+  "status": "PASS"
+}

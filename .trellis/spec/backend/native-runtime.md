@@ -40,9 +40,11 @@ hvigorw assembleHap -p product=default -p buildMode=release `
   -c properties.enableSignTask=false -p TARGET_PLATFORM=ohos-arm64 --no-daemon
 ```
 
-For `flutter build hap`, the equivalent local configuration is
-`"properties": {"enableSignTask": false}` in `ohos/hvigor/hvigor-config.json5`.
-Save its original bytes and restore them in `finally` after verification.
+For `flutter build hap --release --target-platform ohos-arm64 --no-codesign`,
+also set `"properties": {"enableSignTask": false}` temporarily in
+`ohos/hvigor/hvigor-config.json5`. The Flutter flag selects the unsigned output;
+the typed config actually disables Hvigor signing. Save its original bytes and
+restore them in `finally` after verification.
 
 ## 3. Contracts
 
@@ -63,6 +65,12 @@ Save its original bytes and restore them in `finally` after verification.
   content id, native library checksums and file path/asset/size/checksum entries.
   Flatten assets as hash-named `.bin` files for Flutter's directory inclusion.
 - One manifest describes one packaged architecture. HAP target must match it.
+- Preserve manifest-covered native library bytes through platform packaging.
+  OHOS `buildOption.nativeLib.debugSymbol` uses `strip: true` with exclusions
+  `**/libqfli_miri.so` and `**/librustc_*.so`; Android uses matching
+  `jniLibs.keepDebugSymbols` rules. Default OHOS stripping changes adapter/driver
+  checksums even when the library still loads. Compare the final ZIP members
+  against manifest SHA-256 values, not only the pre-package `libs/` directory.
 - Non-OHOS manifests use schema 2, `platform`, `architecture`, `nativeHost`,
   `guestTarget`, `libraryName`, `nativeLibraries` (name/path/role/size/sha256),
   flattened guest/license `files` and content `id`. Android native code remains
@@ -80,6 +88,11 @@ Save its original bytes and restore them in `finally` after verification.
   and generated `flutter_test_listener.*/listener.dart`; explicit Gradle property
   `qfliIntegrationTest=true` forces isolation. Prebuild and inspect the APK before
   Flutter test, which captures its package before rebuilding the listener.
+- On a shared device, re-read the latest coordination events immediately before
+  invoking Flutter device tests or installation. The active product coordinator
+  must explicitly release its window, or authorize a delegate to release it.
+  A worker reporting no device use within its own scope cannot release another
+  coordinator's active tests. Resolve conflicting claims before device changes.
 - Serialize Flutter pub, tests and builds within this workspace. They rewrite
   plugin metadata/registrants; concurrent integration and release preparation
   can leave a release registrant referencing the dev-only integration plugin.
@@ -108,9 +121,11 @@ Save its original bytes and restore them in `finally` after verification.
 | Invalid manifest or extraction failure | preparation throws; next run may retry |
 | Build input does not match pinned revision | stop before compilation |
 | ELF dependency absent or wrong architecture | stop packaging |
+| HAP native member differs from manifest SHA-256 after stripping | preserve covered libraries via nativeLib.debugSymbol exclusions and rebuild |
 | Library compiled but HAP execution unverified | runtimeStatus stays unavailable |
 | Source archive description differs from guest version | E0514; fix bootstrap identity, retain compiler checks |
 | Android test APK has ordinary application ID | stop before installation or Flutter test |
+| Worker release conflicts with active coordinator ownership | hold device tests until coordinator explicitly releases or delegates |
 | Android ARM64 built but no matching device | record build/audit separately; no execution pass |
 | Release registrant references the integration plugin | serialize tooling, regenerate via normal release pub/build |
 | OHOS signing material unavailable | compile unsigned with typed no-sign config; report installation/runtime as unverified |
@@ -135,13 +150,27 @@ modules/generics, streams, stdin/EOF/UTF-8, compiler diagnostics, guest exit,
 limits and stop followed by fresh execution. Editor tests cover save/run/stop
 with actual native source execution. Terminal tests invoke the shipped profile
 delegate through `TerminalManager`/`SandboxShellBackend`, asserting stdout,
-exit 0, native cancellation/130, cleared busy state and a fresh source run.
+exit 0, a `^C` banner, cancellation diagnostics, cleared busy state and a fresh
+source run. The shared shell deliberately leaves `lastExitCode` null after
+cancellation; assert native exit 130 through the runner test separately.
 Android ARM64 execution is established only by its matching packaged device
 test; Android x64 availability requires its own packaged device checks. Apple
 and OHOS evidence remain distinct; retain unavailable environment entries.
 Record final APK/HAP SHA-256, packaged content counts and matching native
 manifest/asset checks after the final source integration, separately from
 baseline build results.
+
+Final 2026-10-15 evidence is in
+`.trellis/tasks/10-15-rust-release-readiness/research/platform-builds.md` and
+`research/ohos-final-package-audit.json`: Android physical ARM64 seven cases
+and API37 x64 seven cases passed independently; x64 used 16 KiB pages. Both
+ordinary final Android release installations launched and passed five-page
+visual/PID-log checks. Final APK/HAP each contain all 166 tutorials/examples;
+the HAP's three arm64 native libraries preserve manifest bytes after stripping.
+OHOS remains runtime-unverified without matching signed packaged execution.
+The temporary emulator/private server were stopped and the physical device was
+explicitly released to Go in global seq56; do not infer continuing device
+ownership from these completed checks.
 
 ## 7. Wrong vs Correct
 
