@@ -6,16 +6,14 @@ import {
   MethodCall,
   MethodResult,
 } from '@ohos/flutter_ohos';
-import { authentication } from '@kit.AccountKit';
 import { systemShare } from '@kit.ShareKit';
 import { common, Want, ConfigurationConstant } from '@kit.AbilityKit';
-import { window } from '@kit.ArkUI';
+import { window, router } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { GeneratedPluginRegistrant } from '../plugins/GeneratedPluginRegistrant';
 import { handlePickerCall, isPickerMethod } from './PickerBridge';
 
 const CHANNEL_PLATFORM = 'qflistudio/platform';
-const CHANNEL_HUAWEI = 'qflistudio/huawei_account';
 
 export default class EntryAbility extends FlutterAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -54,6 +52,16 @@ export default class EntryAbility extends FlutterAbility {
           } else {
             result.error('INVALID_PROGRESS', 'Startup progress must be a number', null);
           }
+        } else if (call.method === 'openAgreement') {
+          const url = call.argument('url') as string;
+          const title = call.argument('title') as string;
+          if (typeof url !== 'string' || !url.startsWith('https://')) {
+            result.error('INVALID_URL', '协议地址无效', null);
+            return;
+          }
+          router.pushUrl({ url: 'pages/AgreementReader', params: { url, title } })
+            .then(() => result.success(null))
+            .catch((err: BusinessError) => result.error('AGREEMENT_OPEN_FAILED', `${err.code}: ${err.message}`, null));
         } else if (call.method === 'openUrl') {
           const url = call.argument('url') as string;
           const want: Want = {
@@ -94,48 +102,5 @@ export default class EntryAbility extends FlutterAbility {
       },
     });
 
-    // 华为账号（Account Kit v4 / API 11）：
-    // AuthorizationWithHuaweiIDRequest -> executeRequest -> authorizationCode，
-    // authorizationCode 交给服务端换取 token / userinfo。
-    const huaweiChannel = new MethodChannel(
-      flutterEngine.dartExecutor.getBinaryMessenger(),
-      CHANNEL_HUAWEI,
-    );
-    huaweiChannel.setMethodCallHandler({
-      onMethodCall(call: MethodCall, result: MethodResult): void {
-        if (call.method === 'login') {
-          try {
-            const provider = new authentication.HuaweiIDProvider();
-            const request: authentication.AuthorizationWithHuaweiIDRequest =
-              provider.createAuthorizationWithHuaweiIDRequest();
-            request.scopes = ['openid'];
-            request.permissions = [];
-
-            const controller =
-              new authentication.AuthenticationController(abilityContext);
-            controller.executeRequest(request)
-              .then((response: authentication.AuthenticationResponse) => {
-                const authResponse =
-                  response as authentication.AuthorizationWithHuaweiIDResponse;
-                const code: string =
-                  authResponse.data?.authorizationCode ?? '';
-                if (code.length > 0) {
-                  result.success(code);
-                } else {
-                  result.error('HUAWEI_LOGIN_EMPTY', '未获取到授权码', null);
-                }
-              })
-              .catch((err: BusinessError) => {
-                result.error('HUAWEI_LOGIN_FAILED', `${err.code}: ${err.message}`, null);
-              });
-          } catch (e) {
-            const err = e as BusinessError;
-            result.error('HUAWEI_LOGIN_ERROR', `${err.code}: ${err.message}`, null);
-          }
-        } else {
-          result.notImplemented();
-        }
-      },
-    });
   }
 }

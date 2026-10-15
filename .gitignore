@@ -68,6 +68,8 @@ app.*.map.json
 
 # Native language runtime build output
 **/native/build/
+/android/app/src/main/jniLibs/
+/scripts/__pycache__/
 
 # Generated upstream MIR standard library, codegen backend and license bundle.
 /assets/miri/*

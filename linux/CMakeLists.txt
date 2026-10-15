@@ -91,6 +91,9 @@ install(CODE "
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/../native/runtime_bundle.cmake")
+qfli_install_runtime(linux "${INSTALL_BUNDLE_LIB_DIR}")
+
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 

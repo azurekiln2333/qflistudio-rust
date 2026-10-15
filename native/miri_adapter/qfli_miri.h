@@ -44,6 +44,14 @@ typedef struct {
 uint32_t qfli_miri_abi_version(void);
 /* Inputs are copied. Paths must exist and be absolute; output limit >=1024. */
 QfliSession *qfli_miri_create(const QfliConfig *config);
+/* Optional ABI-1 extension. NULL backend_path uses the original default.
+ * Non-NULL is an absolute UTF-8 native library/framework executable path,
+ * copied by create. Invalid paths or a conflicting process backend return NULL.
+ * The first successful create fixes the backend for the process; destroying a
+ * session does not reset it. Load/init errors appear in diagnostics during run.
+ * Keep the adapter and its compiler/backend libraries loaded until process exit. */
+QfliSession *qfli_miri_create_with_backend(const QfliConfig *config,
+                                         const char *backend_path);
 /* Blocking: invoke on a worker. 0 means accepted, -1 means invalid/busy. */
 int32_t qfli_miri_run(QfliSession *session);
 /* Concurrent-safe. Checks at rustc phase callbacks and MIR block terminators.

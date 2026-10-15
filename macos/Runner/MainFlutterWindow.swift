@@ -10,6 +10,16 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
+    let channel = FlutterMethodChannel(
+      name: "qflistudio/runtime", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    channel.setMethodCallHandler { call, result in
+      if call.method == "getRuntimeLibraryDirectory" {
+        result(Bundle.main.privateFrameworksPath)
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
     super.awakeFromNib()
   }
 }

@@ -12,6 +12,7 @@ extern crate rustc_session;
 use std::ffi::{CStr, c_char};
 use std::io::{self, Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -35,6 +36,14 @@ const LIMIT_REACHED: u32 = 4;
 const INTERNAL_ERROR: u32 = 5;
 const MAX_INPUT: usize = 16 * 1024 * 1024;
 static COMPILER_LOCK: Mutex<()> = Mutex::new(());
+static COMPILER_BACKEND: Mutex<Option<BackendIdentity>> = Mutex::new(None);
+
+#[derive(PartialEq, Eq)]
+enum BackendIdentity {
+    Default,
+    DefaultSysroot(PathBuf),
+    External(PathBuf),
+}
 
 #[repr(C)]
 pub struct QfliConfig {
@@ -60,6 +69,7 @@ pub struct QfliResult {
 pub struct QfliSession {
     source: String,
     sysroot: String,
+    backend_path: Option<String>,
     io: Arc<SessionIo>,
     result: Mutex<QfliResult>,
     started: AtomicBool,
@@ -181,16 +191,25 @@ impl Write for DiagnosticWriter {
 
 struct CompilerCallbacks {
     io: Arc<SessionIo>,
+    backend_path: Option<String>,
     exit_code: i32,
     interpreted: bool,
 }
 
-fn make_backend(sess: &Session) -> Box<dyn CodegenBackend> {
+fn make_backend(sess: &Session, backend_path: Option<&str>, io: &SessionIo) -> Box<dyn CodegenBackend> {
     let early_dcx = EarlyDiagCtxt::new(sess.opts.error_format);
-    let backend = rustc_interface::util::get_codegen_backend(
-        &early_dcx, &sess.opts.sysroot, None, &sess.target,
-    );
-    backend.init(sess);
+    // rustc loads the backend before psess_created installs our diagnostic emitter.
+    let backend = catch_unwind(AssertUnwindSafe(|| {
+        let backend = rustc_interface::util::get_codegen_backend(
+            &early_dcx, &sess.opts.sysroot, backend_path, &sess.target,
+        );
+        backend.init(sess);
+        backend
+    })).unwrap_or_else(|error| {
+        let name = backend_path.unwrap_or("compiler default");
+        let _ = io.append(2, format!("failed to initialize native codegen backend: {name}\n").as_bytes());
+        std::panic::resume_unwind(error)
+    });
     Box::new(DummyCodegenBackend {
         target_config_override: Some(Box::new(move |sess| {
             let mut config = backend.target_config(sess);
@@ -205,7 +224,11 @@ fn make_backend(sess: &Session) -> Box<dyn CodegenBackend> {
 
 impl rustc_driver::Callbacks for CompilerCallbacks {
     fn config(&mut self, config: &mut rustc_interface::interface::Config) {
-        config.make_codegen_backend = Some(Box::new(make_backend));
+        let backend_path = self.backend_path.clone();
+        let backend_io = self.io.clone();
+        config.make_codegen_backend = Some(Box::new(move |sess| {
+            make_backend(sess, backend_path.as_deref(), &backend_io)
+        }));
         config.extra_symbols = miri::sym::EXTRA_SYMBOLS.into();
         // Apply the pinned upstream MIRI_DEFAULT_ARGS through structured options.
         let opts = &mut config.opts.unstable_opts;
@@ -278,7 +301,7 @@ unsafe fn path_string(value: *const c_char) -> Option<String> {
         return None;
     }
     let path = unsafe { CStr::from_ptr(value) }.to_str().ok()?;
-    if path.is_empty() || !std::path::Path::new(path).is_absolute() {
+    if path.is_empty() || !Path::new(path).is_absolute() {
         return None;
     }
     Some(path.to_owned())
@@ -286,10 +309,46 @@ unsafe fn path_string(value: *const c_char) -> Option<String> {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn qfli_miri_create(config: *const QfliConfig) -> *mut QfliSession {
-    ffi_guard(ptr::null_mut(), || unsafe { create_session(config) })
+    ffi_guard(ptr::null_mut(), || unsafe { create_session(config, ptr::null()) })
 }
 
-unsafe fn create_session(config: *const QfliConfig) -> *mut QfliSession {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn qfli_miri_create_with_backend(
+    config: *const QfliConfig, backend_path: *const c_char,
+) -> *mut QfliSession {
+    ffi_guard(ptr::null_mut(), || unsafe { create_session(config, backend_path) })
+}
+
+fn external_backend(path: &Path) -> Option<(Option<String>, BackendIdentity)> {
+    if !path.is_file() { return None; }
+    let canonical = path.canonicalize().ok()?;
+    // Upstream recognizes an explicit backend filename by the presence of '.'.
+    let load_path = canonical.parent()?.join(".").join(canonical.file_name()?);
+    let load_path = load_path.to_str()?;
+    if !load_path.contains('.') { return None; }
+    Some((Some(load_path.to_owned()), BackendIdentity::External(canonical)))
+}
+
+fn default_backend(sysroot: &Path) -> Option<(Option<String>, BackendIdentity)> {
+    if cfg!(all(target_env = "ohos", target_arch = "x86_64")) {
+        let directory = sysroot.join("lib/rustlib")
+            .join(rustc_session::config::host_tuple()).join("codegen-backends");
+        let names = ["librustc_codegen_cranelift-1.98.1.so", "librustc_codegen_cranelift.so"];
+        let mut matches = names.into_iter().map(|name| directory.join(name)).filter(|path| path.is_file());
+        let path = matches.next()?;
+        if matches.next().is_some() { return None; }
+        return external_backend(&path);
+    }
+    // Mobile source builds may use an external default backend in this sysroot.
+    let identity = if cfg!(any(target_os = "android", target_os = "ios")) {
+        BackendIdentity::DefaultSysroot(sysroot.canonicalize().ok()?)
+    } else {
+        BackendIdentity::Default
+    };
+    Some((None, identity))
+}
+
+unsafe fn create_session(config: *const QfliConfig, backend_path: *const c_char) -> *mut QfliSession {
     let Some(config) = (unsafe { config.as_ref() }) else { return ptr::null_mut() };
     if config.abi_version != ABI_VERSION || config.stdin_len > MAX_INPUT
         || (config.stdin_len != 0 && config.stdin_data.is_null())
@@ -301,14 +360,27 @@ unsafe fn create_session(config: *const QfliConfig) -> *mut QfliSession {
     }
     let Some(source) = (unsafe { path_string(config.source_path) }) else { return ptr::null_mut() };
     let Some(sysroot) = (unsafe { path_string(config.sysroot_path) }) else { return ptr::null_mut() };
-    if !std::path::Path::new(&source).is_file() || !std::path::Path::new(&sysroot).is_dir() {
+    if !Path::new(&source).is_file() || !Path::new(&sysroot).is_dir() {
         return ptr::null_mut();
     }
+    let backend = if backend_path.is_null() {
+        default_backend(Path::new(&sysroot))
+    } else {
+        unsafe { path_string(backend_path) }.and_then(|path| external_backend(Path::new(&path)))
+    };
+    let Some((backend_path, identity)) = backend else { return ptr::null_mut() };
     let input = if config.stdin_len == 0 { vec![] } else {
         unsafe { std::slice::from_raw_parts(config.stdin_data, config.stdin_len) }.to_vec()
     };
+    // rustc caches the first backend factory globally, even across destroyed sessions.
+    let mut selected_backend = lock(&COMPILER_BACKEND);
+    if let Some(selected) = selected_backend.as_ref() {
+        if selected != &identity { return ptr::null_mut(); }
+    } else {
+        *selected_backend = Some(identity);
+    }
     Box::into_raw(Box::new(QfliSession {
-        source, sysroot,
+        source, sysroot, backend_path,
         io: Arc::new(SessionIo {
             stdin: Mutex::new(io::Cursor::new(input)),
             output: Mutex::new([vec![], vec![], vec![]]),
@@ -345,7 +417,10 @@ unsafe fn run_session(session: *mut QfliSession) -> i32 {
             "--edition=2024".into(), "--crate-name=qfli_user_program".into(),
             "--color=never".into(),
         ];
-        let mut callbacks = CompilerCallbacks { io: session.io.clone(), exit_code: 1, interpreted: false };
+        let mut callbacks = CompilerCallbacks {
+            io: session.io.clone(), backend_path: session.backend_path.clone(),
+            exit_code: 1, interpreted: false,
+        };
         let compiler_exit = rustc_driver::catch_fatal_errors(|| rustc_driver::run_compiler(&args, &mut callbacks));
         if compiler_exit.is_err() || !callbacks.interpreted { 1 } else { callbacks.exit_code }
     }));

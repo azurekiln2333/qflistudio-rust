@@ -46,4 +46,6 @@ cargo build --manifest-path "$build_root/source/cargo-miri/Cargo.toml" --locked
 export MIRI="$CARGO_TARGET_DIR/debug/miri"
 export MIRI_SYSROOT="$build_root/sysroot"
 "$CARGO_TARGET_DIR/debug/cargo-miri" miri setup --target x86_64-unknown-linux-gnu
+python3 "$script_dir/miri_build_support.py" record-guest --toolchain "$host_sysroot" \
+  --miri-source "$source_dir" --guest-sysroot "$MIRI_SYSROOT"
 echo "MIR sysroot: $MIRI_SYSROOT"
