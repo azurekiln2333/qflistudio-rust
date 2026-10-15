@@ -59,7 +59,7 @@
     ],
     "platformCommit": "ca6853e",
     "evidenceCommit": "08c2605",
-    "deviceHandoff": "OPD2413 explicitly released to Go coordinator in global seq56; emulator5580/private ADB5039 stopped only",
+    "deviceHandoff": "OPD2413 explicitly released to Go coordinator in global seq56; authoritatively confirmed by Rust coordinator seq58; emulator5580/private ADB5039 stopped only",
     "artifacts": {
       "android": {
         "path": "build/app-release-final.apk",
@@ -72,6 +72,8 @@
         "sha256": "bc64d9f1d721a7d75a391f13a0ea1a568586aec34341643736775bf97e7ae780",
         "signed": false
       }
-    }
+    },
+    "finalReleaseEvidenceCommit": "6de0e35",
+    "sessionRecord": ".trellis/workspace/lichengyu/journal-1.md Session3"
   }
 }

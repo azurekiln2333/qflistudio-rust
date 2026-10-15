@@ -11,7 +11,7 @@
 - [x] Build Android APK and OHOS HAP; capture actual output and runtime assets.
 - [x] Inspect adb/hdc devices; run integration checks where a device is reachable.
 - [x] Independent cross review, fix verified issues, rerun affected checks.
-- [ ] Update executable specs, task evidence and journal; stage explicit files and
+- [x] Update executable specs, task evidence and journal; stage explicit files and
       create conventional commits after each verified deliverable.
 
 Evidence lives under research/. Do not mark tasks complete while a required build
@@ -65,7 +65,8 @@ or runtime check is blocked. Never reset pre-existing work or commit sibling rep
   seq44; SQL coordinator claimed it in seq46 and released it in seq53. Rust
   accepted54/55 before its final 7/7 physical run, then installed/launched and
   reviewed the exact final ordinary APK on all five pages. Rust explicitly
-  released the physical window to Go coordinator in global56. Emulator5580/
+  released the physical window to Go coordinator in global56; Rust coordinator
+  confirmed its authoritative release in global58. Emulator5580/
   private ADB5039 handed over by Go48/49 was stopped after
   the final 7/7 x64 suite and ordinary final-APK five-page smoke. Shared5037 and
   the original AVD remain preserved. Worker-only release cannot override the
@@ -80,3 +81,11 @@ or runtime check is blocked. Never reset pre-existing work or commit sibling rep
   Keep OHOS runtime unavailable until packaged execution is verified.
 - Retain the broader cross-platform task for Windows native adapter/sysroot and
   Apple-host execution; passing desktop rustc/Cargo is separate evidence.
+
+## Session record
+
+Final build/device/spec evidence is committed as `6de0e35`. Session3 in
+`.trellis/workspace/lichengyu/journal-1.md` records all validated work commits,
+test counts and the remaining signing/runtime requirements. Completed terminal
+and curriculum children retain completed metadata; readiness and broader native
+tasks remain open rather than being archived before their actual acceptance.

@@ -370,9 +370,10 @@ Logs: `android-final-arm64-release-smoke.log`,
 `android-final-arm64-release-pid.log`.
 
 Force-stopped only Rust's ordinary and isolated-test apps, then **explicitly
-released the physical device to Go coordinator in global seq56**. No further
-Rust device actions are planned. The exclusive Flutter build/test window was
-also returned to the Rust root coordinator after both final build audits,
+released the physical device to Go coordinator in global seq56**. Rust
+coordinator wB:p1 authoritatively confirmed this physical release in global
+seq58. No further Rust device actions are planned. The exclusive Flutter
+build/test window was returned to the Rust root coordinator after both final build audits,
 both seven-case integration runs and both ordinary release smoke checks.
 
 ### Final quality gate and remaining release limits

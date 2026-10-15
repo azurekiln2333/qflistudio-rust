@@ -114,6 +114,7 @@ fatal/unhandled/overflow entries. The ordinary Rust package was not previously
 installed, so its firstInstallTime is new, not asserted unchanged. Only Rust's
 ordinary/test apps were force-stopped; no product was uninstalled or data-cleared.
 Rust explicitly released the physical window to Go coordinator in global seq56.
+Rust coordinator wB:p1 authoritatively confirmed that release in global seq58.
 All Rust Flutter/build and device ownership is now released. No release may be
 inferred from a worker's limited scope or another pane's blocked status.
 
@@ -134,6 +135,7 @@ credentials were changed; OHOS runtime availability stays unverified.
 - `5384d29` — complete 166 lessons, imports and accepted final corpus.
 - `08c2605` — final curriculum/terminal task completion and shared-core evidence.
 - `ca6853e` — preserved OHOS library checksums and final native terminal suite.
+- `6de0e35` — final package/device audits, executable specs and release evidence.
 
 Final platform and task/journal commits are recorded in Git and task metadata.
 Unrelated initial editor configuration, diagnostic snapshots and generated
