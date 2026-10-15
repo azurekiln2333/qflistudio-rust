@@ -84,6 +84,142 @@ the index, in this range no lesson is `miri-candidate` or `external`.
 - `projectOutput` holds the whole project stdout; `verify` ∈ {run,build,test};
 - no network dependencies (std or local `path` only; `--offline`).
 
+## Cross-review fixes (round 1)
+
+Applied 2026-10-15 after coordinator cross-review; only my owned JSON changed
+(8 lines in `topics_001_084.json`), then fully re-verified.
+
+1. **005** `projectOutput` held a stale `sum_sq=385…` from an earlier draft.
+   `_build.py` now sets `projectOutput = output` whenever the project's default
+   binary is the lesson `code` and `verify == "run"`; 005 therefore reports the
+   real project stdout (the profile-knobs list + sum), identical to `output`.
+2. **007** explain wrongly claimed a shared workspace lock prevents multiple
+   incompatible versions. Corrected: the shared lock makes resolution consistent
+   across members and avoids duplicate builds/feature skew, but Cargo *does*
+   allow incompatible major versions to coexist; type-incompatibility only
+   appears when such a value must cross crate boundaries.
+3. **009** explain wrongly said a missing `rerun-if-changed` reuses stale
+   artifacts. Corrected to the real semantics: with no rerun directives cargo
+   re-runs the build script when any package file changes (conservative full
+   watch); emitting specific directives disables that default. The pitfall was
+   rewritten to the real risk (declaring only some paths while omitting others).
+4. **025** explain wrongly said `repr(Rust)` keeps declaration order. Corrected:
+   the default representation may reorder fields and is not C-layout-compatible;
+   stable layout requires `repr(C)`.
+5. **032** exercise answer did not actually preserve the original calculator's
+   `*`/`/` precedence (it only folded `+`/`-` via `f64::INFINITY` sentinels).
+   Replaced with a complete program: `neg` is normalized as a unary prefix that
+   still yields a numeric token, so the original two-pass mul/div-then-add/sub
+   precedence, divide-by-zero and trailing-operand errors are all preserved. The
+   prompt/hint were rewritten to match, and the answer self-tests six inputs
+   (`2 + 3 * 4`, `neg 5 + 2`, `neg 3 * 4`, `10 / 4 - 1`, `5 / 0`, `3 +`).
+
+Re-validation after the fixes: `_build.py` OK, `_audit.py` all pass,
+`_validate.py` **175/175 pass, 0 failures** (84 code + 84 answer + 7 projects)
+with the same real GNU toolchain and link flags.
+
+## Cross-review fixes (round 2)
+
+1. **015** explain — corrected float→int `as`: it is *saturating* (since
+   Rust 1.45), NaN→0, and integer/bool numeric `as` never causes UB; the old
+   "undefined depending on version" claim was wrong.
+2. **047** code — `tail` used `len - n` byte slicing, panicking on Chinese.
+   Rewritten to count/slice by `chars`/`char_indices`, with a中文 test case and a
+   new pitfall about UTF-8 byte-boundary slicing.
+3. **048** explain — `Cell<T>`'s `set`/`replace`/`take`/`into_inner` work for
+   *any* `T`; only `get` requires `Copy`. Corrected.
+4. **049** explain — `HashMap::entry(key)` takes key **by value** (ownership),
+   not by reference. Corrected.
+5. **060** code — `render` byte-sliced `&text[..width-1]`, panicking on
+   multi-byte input. Rewritten to char-count truncation/padding, with Chinese
+   test cases; explain notes the byte hazard.
+
+## Cross-review fixes (round 3)
+
+1. **065** — exercise prompt said `i128` but answer used `i64`; prompt updated
+   to `i64` (consistent, and `i64::MIN / -1` genuinely overflows).
+2. **076** — the exercise required a real `merge` but the answer only had the
+   default empty op. Now implements `entries()` and a genuine default `merge`
+   that overwrites/补齐 from `other`; answer verified by real run.
+3. **079** — `From<&str> for UserId` used `len()` and dropped the text while
+   claiming lossless. Now `From<String>` is lossless (keeps the text) and
+   `TryFrom<&str>` validates digits with real errors; the `From<&str>` +
+   `TryFrom<&str>` E0119 blanket-impl conflict is documented and avoided.
+4. **081** — tolerance `PartialEq` violated transitivity (20.0≈20.3≈20.6 but
+   20.0≉20.6). Now `PartialEq` is exact per-field equality (`to_bits`/`Eq`) and a
+   separate `approx_eq(tolerance)` method expresses approximate comparison.
+5. **084** — lesson code and answer escaping was incomplete. Both now have
+   `json_escape` (quote, backslash, `\n\r\t\b\f`, `\u00XX` for other control
+   chars) and RFC-4180 `csv_escape` (quote when comma/quote/newline, double
+   internal quotes), tested on a record with中文、引号、反斜杠、换行、逗号、制表符.
+
+Re-validation after rounds 2+3: `_build.py` OK, `_audit.py` all pass,
+`_validate.py` **175/175 pass, 0 failures** (84 code + 84 answers + 7 projects)
+on the real GNU toolchain, and a 15-point content assertion confirms every fix.
+
+## Cross-review fixes (round 4)
+
+1. **006** code+explain — `caret_allows` only checked equal-major; the general
+   `^` claim was wrong for pre-1.0. Rewritten with correct Cargo semantics:
+   `^1.2.3` → `<2.0.0`, `^0.2.3` → `<0.3.0`, `^0.0.3` → `<0.0.4`; code now
+   computes a proper upper bound and tests 0.x / 0.0.x cases; explain and output
+   updated (real run).
+2. **012** explain — corrected the `#[test]` signature: functions take no
+   arguments and may return `()` **or** any `Termination` type (e.g.
+   `Result<(), E>`, where `Err` fails), not only `()`.
+3. **015** explain — the float→float "saturates" claim was wrong. Corrected to
+   IEEE 754 round-to-nearest: f64→f32 can yield ±infinity when out of range
+   (`f64::MAX as f32 == f32::INFINITY`), NaN stays NaN; saturation applies only
+   to float→int.
+4. **049** explain — `HashMap::remove` deletes the whole entry (no `None` slot);
+   the `Option<V>` only signals a possibly-missing key. `Vec` has no holes either.
+5. **079** explain — made explicit that `From` must be genuinely lossless (cannot
+   drop/encode less information, e.g. via `len()`); the answer's `From<String>`
+   keeps the text and `TryFrom<&str>` is the validated fallible path.
+6. **081** explain+answer — clarified `PartialEq`'s contract is symmetry +
+   transitivity (reflexivity is `Eq`'s extra requirement); the bit-equality
+   `PartialEq` (`to_bits`, `impl Eq`) is symmetric/transitive but treats `+0.0`
+   and `-0.0` as unequal and same-bit `NaN` as equal — documented as an explicit
+   choice; `approx_eq` carries the tolerance comparison.
+
+Round-4 re-validation: `_build.py` OK, `_audit.py` all pass, `_validate.py`
+**175/175 pass, 0 failures**, plus an 8-point round-4 assertion (all PASS) and a
+re-check that all rounds 1–3 fixes are still present (all True).
+
+## Cross-review fixes (round 4 completion)
+
+The first round-4 pass missed the **079 main `code`** (only the answer was fixed).
+Final corrections:
+
+1. **079 main code** — replaced the still-wrong `struct UserId(u64)` +
+   `From<&str> { UserId(value.len() as u64) }` (output `UserId(4)`) with a
+   genuinely lossless `struct UserId(String)`, `From<String>`/`From<&str>`
+   preserving all text, plus `assert_ne!` proving two same-length, different-text
+   ids (`"abcd"` vs `"wxyz"`) stay distinct. `output` updated from a real run.
+   (079 is desktop, so there is no bundled `files`/`src/main.rs` to mirror.)
+2. **081 exercise answer comment** — removed the wrong line "PartialEq 必须是
+   等价关系：自反、对称、传递。" It now states the correct contract
+   (symmetry + transitivity; reflexivity is `Eq`'s extra requirement) and notes
+   the `to_bits` bit-equality choice.
+3. **048 explain first sentence** — clarified that `set`/`replace`/`into_inner`
+   work for any `T`, while `take` requires `T: Default` (it leaves
+   `T::default()`), and only `get` requires `T: Copy`.
+
+Targeted re-verify (no full 84 rerun, per instruction):
+`_build.py` OK, `_audit.py` all pass; 10-point assertion for 048/079/081 all
+PASS; real compile+run of lessons 48/79/81 (code + answer) all ok, and 079's
+`code` stdout equals `output` exactly.
+
+## Scratch helpers relocated
+
+All authoring/validation helpers (`_a*.*`, `_b*.*`, `_c*.*`, `_d*.*`, `_e1.py`,
+`_e2.py`, `_build.py`, `_validate.py`, `_audit.py`, `_fixquotes.py`,
+`_patch_r4b.py`, `_check_r4b*.py`, `_scratch079.*`) were moved from
+`tool/rust_content/` to `build/content-author-scratch/`, which is gitignored
+(`**/build/`) and stays safely inside the Rust repo. No other files were deleted.
+`_build.py`/`_validate.py`/`_audit.py` were repointed so they read/write the
+canonical `tool/rust_content/topics_001_084.json`.
+
 ## Validation performed locally (real compiler)
 
 `native/build/miri-windows/compiler/bin/rustc.exe` 1.98.1 was used:
