@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:qfli_rust/main.dart' show rustProfile;
+import 'package:qfli_rust/native_miri_runner.dart';
 import 'package:qfli_rust/rust_runner.dart';
 import 'package:qfli_studio_core/services/project_templates.dart';
 import 'package:qfli_studio_core/services/runner_service.dart';
@@ -43,6 +44,17 @@ void main() {
     }
   }
 
+  bool windowsGnuAvailable() {
+    if (!Platform.isWindows) return false;
+    try {
+      final result = Process.runSync('rustc', ['-vV']);
+      return result.exitCode == 0 &&
+          (result.stdout as String).contains('host: x86_64-pc-windows-gnu');
+    } on ProcessException {
+      return false;
+    }
+  }
+
   Future<(int, List<String>, List<String>)> runRust(
     String entry, {
     RustProgramRunner runner = const RustProgramRunner(),
@@ -56,6 +68,17 @@ void main() {
     final errors = result.stderr.toList();
     final code = await result.exitCode;
     return (code, await output, await errors);
+  }
+
+  Future<void> expectStartupFailure(
+    ProgramRunResult result,
+    String diagnostic,
+  ) async {
+    final output = result.stdout.toList();
+    final errors = result.stderr.toList();
+    expect(await result.exitCode, kProgramNotRunExitCode);
+    expect(await output, isEmpty);
+    expect((await errors).join('\n'), contains(diagnostic));
   }
 
   group('档位收窄', () {
@@ -165,6 +188,77 @@ fn main() {
       expect(secondOutput, ['cargo-ready']);
     }, skip: !toolAvailable('cargo'));
 
+    test('Cargo 项目按选中的备用入口运行，而不是默认 main', () async {
+      write('Cargo.toml', '''
+[package]
+name = "qfli_multi"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "primary"
+path = "src/main.rs"
+
+[[bin]]
+name = "secondary"
+path = "src/alt.rs"
+''');
+      write('src/main.rs', 'fn main() { println!("primary-target"); }');
+      write('src/alt.rs', 'fn main() { println!("secondary-target"); }');
+      final (code, output, errors) = await runRust('src/alt.rs');
+      expect(code, 0, reason: errors.join('\n'));
+      expect(output, ['secondary-target']);
+    }, skip: !toolAvailable('cargo'));
+
+    test('Cargo 项目按自定义 target 名与路径运行 example', () async {
+      write('Cargo.toml', '''
+[package]
+name = "qfli_example"
+version = "0.1.0"
+edition = "2021"
+
+[[example]]
+name = "named_demo"
+path = "examples/named_demo.rs"
+''');
+      write('src/main.rs', 'fn main() {}');
+      write(
+        'examples/named_demo.rs',
+        'fn main() { println!("example-target"); }',
+      );
+      final (code, output, errors) = await runRust('examples/named_demo.rs');
+      expect(code, 0, reason: errors.join('\n'));
+      expect(output, ['example-target']);
+    }, skip: !toolAvailable('cargo'));
+
+    test(
+      'Cargo 项目中未注册的普通 .rs 走单文件 rustc 路线',
+      () async {
+        write('Cargo.toml', '''
+[package]
+name = "qfli_unregistered"
+version = "0.1.0"
+edition = "2021"
+''');
+        write('src/main.rs', 'fn main() { println!("default-main"); }');
+        write('main2.rs', 'fn main() { println!("standalone-main2"); }');
+        final (code, output, errors) = await runRust('main2.rs');
+        expect(code, 0, reason: errors.join('\n'));
+        expect(output, ['standalone-main2']);
+        expect(errors.join('\n'), isNot(contains('default-main')));
+      },
+      skip: !toolAvailable('cargo') || !toolAvailable('rustc'),
+    );
+
+    test('Cargo metadata 不可用时明确失败，不回跑默认 main', () async {
+      write('Cargo.toml', 'this is not valid toml =');
+      write('src/main.rs', 'fn main() { println!("should-not-run"); }');
+      final (code, output, errors) = await runRust('src/main.rs');
+      expect(code, kProgramNotRunExitCode);
+      expect(output, isEmpty);
+      expect(errors.join('\n'), contains('cargo metadata'));
+    }, skip: !toolAvailable('cargo'));
+
     test('编译失败显示 rustc 诊断，不运行旧程序', () async {
       write('main.rs', 'fn main() { println!("old executable"); }');
       final (firstCode, firstOutput, _) = await runRust('main.rs');
@@ -210,6 +304,66 @@ fn main() {
       expect(output, isEmpty);
       expect(errors.join('\n'), contains('PATH'));
     });
+
+    test(
+      'explicit RUSTC environment selects the configured compiler',
+      () async {
+        write('main.rs', 'fn main() {}');
+        final (code, output, errors) = await runRust(
+          'main.rs',
+          runner: const RustProgramRunner(
+            environment: {'RUSTC': 'qfli_missing_configured_rustc'},
+          ),
+        );
+        expect(code, kProgramNotRunExitCode);
+        expect(output, isEmpty);
+        expect(errors.join('\n'), contains('qfli_missing_configured_rustc'));
+      },
+    );
+
+    test(
+      'explicit encoded linker flags are preserved for direct rustc',
+      () async {
+        write('main.rs', 'fn main() {}');
+        final (code, output, errors) = await runRust(
+          'main.rs',
+          runner: const RustProgramRunner(
+            environment: {
+              'CARGO_ENCODED_RUSTFLAGS':
+                  '-C\u001flinker=qfli_missing_explicit_linker.exe',
+            },
+          ),
+        );
+        expect(code, isNot(0));
+        expect(code, isNot(kProgramNotRunExitCode));
+        expect(output, isEmpty);
+        expect(errors.join('\n'), contains('qfli_missing_explicit_linker.exe'));
+      },
+      skip: !windowsGnuAvailable(),
+    );
+
+    test(
+      'Cargo linker TOML configuration is not overwritten by bundled flags',
+      () async {
+        write('Cargo.toml', '''
+[package]
+name = "qfli_configured_linker"
+version = "0.1.0"
+edition = "2021"
+''');
+        write('.cargo/config.toml', '''
+[target.x86_64-pc-windows-gnu]
+linker = "qfli_missing_cargo_linker.exe"
+''');
+        write('src/main.rs', 'fn main() {}');
+        final (code, output, errors) = await runRust('src/main.rs');
+        expect(code, isNot(0));
+        expect(code, isNot(kProgramNotRunExitCode));
+        expect(output, isEmpty);
+        expect(errors.join('\n'), contains('qfli_missing_cargo_linker.exe'));
+      },
+      skip: !windowsGnuAvailable() || !toolAvailable('cargo'),
+    );
 
     test('找不到 Rust 源文件时不启动工具链', () async {
       final (code, output, errors) = await runRust('missing.rs');
@@ -270,6 +424,62 @@ fn main() {
     });
   });
 
+  group('运行标题', () {
+    test('桌面路线标题是简洁的 run <项目相对路径>', () async {
+      write('src/main.rs', 'fn main() {}');
+      final result =
+          await const RustProgramRunner(
+            rustcExecutable: 'qfli_missing_rustc_for_title',
+          ).run(
+            projectPath: project.path,
+            entryFile: p.join(project.path, 'src/main.rs'),
+          );
+      expect(result, isNotNull);
+      expect(result!.title, 'run src/main.rs');
+      expect(result.title, isNot(contains('运行')));
+      expect(result.title, isNot(contains('Rust')));
+      await expectStartupFailure(result, 'qfli_missing_rustc_for_title');
+    });
+
+    test('嵌入式路线标题同为 run <项目相对路径>，无 Miri 后缀', () async {
+      final sysroot = (Directory(
+        p.join(project.path, 'sysroot'),
+      )..createSync()).path;
+      write('main2.rs', 'fn main() {}');
+      final result =
+          await RustProgramRunner(
+            executionMode: RustExecutionMode.embedded,
+            embeddedRunner: NativeMiriProgramRunner(
+              sysrootPath: sysroot,
+              libraryPath: p.join(project.path, 'missing_native_library'),
+            ),
+          ).run(
+            projectPath: project.path,
+            entryFile: p.join(project.path, 'main2.rs'),
+          );
+      expect(result, isNotNull);
+      // The failure title still goes through the shared concise contract.
+      expect(result!.title, 'run main2.rs');
+      expect(result.title, isNot(contains('Miri')));
+      await expectStartupFailure(result, 'missing_native_library');
+    });
+
+    test('含空格的项目相对路径在标题中被引号包裹', () async {
+      write('src/my file.rs', 'fn main() {}');
+      final result =
+          await const RustProgramRunner(
+            rustcExecutable: 'qfli_missing_rustc_for_title',
+          ).run(
+            projectPath: project.path,
+            entryFile: p.join(project.path, 'src/my file.rs'),
+          );
+      expect(result, isNotNull);
+      expect(result!.title, 'run "src/my file.rs"');
+      expect(result.title, isNot(contains('运行')));
+      await expectStartupFailure(result, 'qfli_missing_rustc_for_title');
+    });
+  });
+
   group('运行按钮分流', () {
     test('点运行走 Rust 后端并执行源码', () async {
       write('main.rs', 'fn main() { println!("through runner"); }');
@@ -279,7 +489,7 @@ fn main() {
       );
       expect(result, isNotNull);
       expect(result!.hint, isNull, reason: '后端接管了就不该走兜底提示');
-      expect(result.title, contains('Rust'));
+      expect(result.title, 'run main.rs');
       expect(await result.stdout!.toList(), ['through runner']);
       expect(await result.stderr!.toList(), isEmpty);
       expect(await result.exitCode, 0);

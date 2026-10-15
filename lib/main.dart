@@ -14,6 +14,7 @@ import 'package:qfli_studio_core/store/settings_store.dart';
 import 'ohos_native_probe.dart';
 import 'rust_project_store.dart';
 import 'rust_runner.dart';
+import 'rust_terminal_commands.dart';
 
 /// 本 App 的产品名。窗口标题、任务切换器和应用内顶栏都读它。
 const String _appTitle = StudioProductCatalog.rustCore;
@@ -27,6 +28,7 @@ const StudioProfile rustProfile = StudioProfile(
   templates: [ProjectTemplate.empty, ProjectTemplate.rust],
   isOffline: true,
   runner: RustProgramRunner(),
+  terminalCommandDelegate: rustTerminalCommandDelegate,
   productKey: StudioProductCatalog.rustCoreKey,
   showHomeTabs: false,
   runtimeKind: 'Rust 工具链',
