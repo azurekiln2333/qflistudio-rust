@@ -2,6 +2,15 @@
 {
   "apiType": 'stageMode',
   "buildOption": {
+    "nativeLib": {
+      "debugSymbol": {
+        "strip": true,
+        "exclude": [
+          "**/libqfli_miri.so",
+          "**/librustc_*.so"
+        ]
+      }
+    }
   },
   "targets": [
     {
