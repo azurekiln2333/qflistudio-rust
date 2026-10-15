@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/native-runtime.md","reason":"Rust FFI runtime and truthful packaging contracts"}
+{"file":".trellis/spec/backend/rust-run-controls.md","reason":"Selected source, terminal output and cancellation"}
+{"file":".trellis/spec/frontend/content-imports.md","reason":"Catalog and real import behavior"}
+{"file":".trellis/tasks/10-12-rust-curriculum-100/research/curriculum-index.md","reason":"166-lesson topic inventory"}
