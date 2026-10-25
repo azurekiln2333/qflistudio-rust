@@ -1,5 +1,6 @@
 param(
   [Parameter(Mandatory = $true)][string]$AdapterLibrary,
+  [Parameter(Mandatory = $true)][string]$AdapterBuildInfo,
   [Parameter(Mandatory = $true)][string]$CompilerLibDirectory,
   [Parameter(Mandatory = $true)][string]$GuestSysroot,
   [Parameter(Mandatory = $true)][string]$SdkRoot,
@@ -7,7 +8,8 @@ param(
   [Parameter(Mandatory = $true)][string]$DependencyMetadata,
   [string]$CodegenBackend,
   [ValidateSet('arm64', 'x64')][string]$Architecture = 'arm64',
-  [string]$WslDistro = 'qfli-java-build'
+  [string]$WslDistro = 'qfli-java-build',
+  [string]$PythonExecutable = 'python'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,7 +30,7 @@ if ($Architecture -eq 'x64') {
 }
 $guestTarget = 'x86_64-unknown-linux-gnu'
 $guestLibraries = Join-Path $GuestSysroot "lib/rustlib/$guestTarget/lib"
-foreach ($required in @($readobj, $readelf, $AdapterLibrary, $CompilerLibDirectory,
+foreach ($required in @($readobj, $readelf, $AdapterLibrary, $AdapterBuildInfo, $CompilerLibDirectory,
     $guestLibraries, $RustSource, $DependencyMetadata)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Missing package input: $required" }
 }
@@ -60,6 +62,27 @@ function Resolve-LinuxInput([string]$Path) {
   return $Path
 }
 
+# Validate producer paths through the explicitly selected WSL distribution.
+# This reads records and hashes only; the helper does not launch WSL.
+$buildSupport = Join-Path $PSScriptRoot 'miri_build_support.py'
+$verifiedJson = & $PythonExecutable $buildSupport 'verify-adapter' `
+  '--adapter-build-info' $AdapterBuildInfo '--adapter' $AdapterLibrary `
+  '--native-host' $hostTarget '--wsl-distro' $WslDistro
+if ($LASTEXITCODE -ne 0) { throw 'Patched compiler and adapter provenance verification failed.' }
+$adapterRecord = ($verifiedJson -join "`n") | ConvertFrom-Json
+$metadataHash = (Get-FileHash -LiteralPath $DependencyMetadata -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($metadataHash -ne $adapterRecord.dependencyMetadata.sha256) {
+  throw 'Dependency metadata differs from the verified adapter build record.'
+}
+$compilerRecords = @($adapterRecord.compilerLibraries)
+if ($CodegenBackend) {
+  $backendName = [IO.Path]::GetFileName($CodegenBackend)
+  $backendHash = (Get-FileHash -LiteralPath $CodegenBackend -Algorithm SHA256).Hash.ToLowerInvariant()
+  if (-not @($compilerRecords | Where-Object { $_.name -eq $backendName -and $_.sha256 -eq $backendHash }).Count) {
+    throw 'Selected codegen backend differs from the verified compiler build.'
+  }
+}
+
 $searchDirs = @(
   (Split-Path -Parent $AdapterLibrary), $CompilerLibDirectory,
   (Join-Path $SdkRoot "native/llvm/lib/$clangTarget"),
@@ -67,6 +90,7 @@ $searchDirs = @(
 )
 if ($CodegenBackend) { $searchDirs += Split-Path -Parent $CodegenBackend }
 $nativeFiles = [ordered]@{}
+$nativeHashes = [ordered]@{}
 $queue = [System.Collections.Generic.Queue[string]]::new()
 $queue.Enqueue($AdapterLibrary)
 if ($CodegenBackend) { $queue.Enqueue($CodegenBackend) }
@@ -76,6 +100,16 @@ while ($queue.Count -gt 0) {
   if ($nativeFiles.Contains($name)) { continue }
   Assert-Architecture $file
   $nativeFiles[$name] = $file
+  $nativeHashes[$name] = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($name -eq 'libqfli_miri.so') {
+    if ($nativeHashes[$name] -ne $adapterRecord.adapter.sha256) {
+      throw 'Adapter changed after provenance verification.'
+    }
+  } elseif ($name -match 'rustc_driver|rustc_codegen|^libstd-|^libLLVM') {
+    if (-not @($compilerRecords | Where-Object { $_.name -eq $name -and $_.sha256 -eq $nativeHashes[$name] }).Count) {
+      throw "Compiler dependency differs from verified build: $name"
+    }
+  }
   foreach ($needed in (Get-NeededLibraries $file)) {
     if ($needed -in @('libc.so', 'libdl.so', 'libm.so', 'libpthread.so', 'librt.so')) { continue }
     $dependency = $null
@@ -108,6 +142,8 @@ function Add-Asset([string]$Source, [string]$RelativePath) {
 
 foreach ($name in $nativeFiles.Keys) {
   Copy-Item -LiteralPath $nativeFiles[$name] -Destination (Join-Path $nativeRoot $name) -Force
+  $copiedHash = (Get-FileHash -LiteralPath (Join-Path $nativeRoot $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($copiedHash -ne $nativeHashes[$name]) { throw "Native input changed during packaging: $name" }
 }
 foreach ($file in (Get-ChildItem -LiteralPath $guestLibraries -Filter '*.rlib' -File)) {
   Add-Asset $file.FullName "sysroot/lib/rustlib/$guestTarget/lib/$($file.Name)"
@@ -144,22 +180,34 @@ foreach ($package in $metadata.packages) {
 
 $manifest = [ordered]@{
   schemaVersion = 1
+  compilerBoundary = $adapterRecord.compilerBoundary
+  compilerBuildSha256 = $adapterRecord.compilerBuild.sha256
+  adapterBuildSha256 = (Get-FileHash -LiteralPath $AdapterBuildInfo -Algorithm SHA256).Hash.ToLowerInvariant()
   rustVersion = '1.98.1'
   rustCommit = '48a229ceaefd4985c50990b14116b6d856af0985'
   nativeHost = $hostTarget
   guestTarget = $guestTarget
   files = @($assetFiles.ToArray())
   nativeLibraries = @($nativeFiles.Keys | ForEach-Object {
-    [ordered]@{ name = $_; sha256 = (Get-FileHash -LiteralPath $nativeFiles[$_] -Algorithm SHA256).Hash.ToLowerInvariant() }
+    [ordered]@{ name = $_; sha256 = $nativeHashes[$_] }
   })
   dependencies = @($notices.ToArray())
 }
-$encoded = $manifest | ConvertTo-Json -Depth 8
+$encoded = $manifest | ConvertTo-Json -Depth 16
 $hasher = [System.Security.Cryptography.SHA256]::Create()
 try {
   $manifest['id'] = [Convert]::ToHexString($hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($encoded))).ToLowerInvariant()
 } finally { $hasher.Dispose() }
-$manifestPath = Join-Path $assetRoot 'manifest.json'
-[System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
+$manifestPath = Join-Path $assetRoot "manifest.ohos-$Architecture.json"
+$manifestJson = $manifest | ConvertTo-Json -Depth 16
+[System.IO.File]::WriteAllText($manifestPath, $manifestJson, [System.Text.UTF8Encoding]::new($false))
+# The legacy loader supported one OHOS architecture per package. Keep its
+# established ARM64 manifest while allowing both new manifests to coexist;
+# packaging x64 must never silently replace ARM64's legacy runtime identity.
+if ($Architecture -eq 'arm64') {
+  $legacyManifestPath = Join-Path $assetRoot 'manifest.json'
+  [System.IO.File]::WriteAllText($legacyManifestPath, $manifestJson, [System.Text.UTF8Encoding]::new($false))
+  Write-Output "Legacy ARM64 manifest: $legacyManifestPath"
+}
 Write-Output "Packaged $hostTarget native libraries and $($assetFiles.Count) MIR/license assets."
 Write-Output "Manifest: $manifestPath"

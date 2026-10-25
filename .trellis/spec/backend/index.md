@@ -7,6 +7,7 @@ Read the contract for the layer being changed before implementing it.
 | Guide | Scope |
 | --- | --- |
 | [Native Runtime](./native-runtime.md) | Pinned rustc/Miri ABI, architecture packages, signing and device evidence |
+| [Compiler Build Provenance](./compiler-build-provenance.md) | Patched compiler identities, immutable inputs and package hash binding |
 | [Rust Run Controls](./rust-run-controls.md) | Cargo target selection, editor gestures and continuous terminal titles |
 | [Rust Terminal](./rust-terminal.md) | Shared delegates, offline Cargo and real process execution |
 

@@ -1,0 +1,189 @@
+diff --git a/rustc_builtin_macros/src/env.rs b/rustc_builtin_macros/src/env.rs
+index aaa9117..53eadae 100644
+--- a/rustc_builtin_macros/src/env.rs
++++ b/rustc_builtin_macros/src/env.rs
+@@ -23,6 +23,14 @@ fn lookup_env<'cx>(cx: &'cx ExtCtxt<'_>, var: Symbol) -> Result<Symbol, VarError
+     if let Some(value) = cx.sess.opts.logical_env.get(var) {
+         return Ok(Symbol::intern(value));
+     }
++    // An embedded session can refuse the ambient host environment, so a name
++    // that `logical_env` does not define stays absent instead of being read
++    // from the process environment. `env!` then reports the ordinary missing
++    // variable error and `option_env!` yields `None`.
++    // See `Options::embedded_boundary`.
++    if cx.sess.opts.embedded_boundary {
++        return Err(VarError::NotPresent);
++    }
+     // If the environment variable was not defined with the `--env-set` option, we try to retrieve it
+     // from rustc's environment.
+     Ok(Symbol::intern(&env::var(var)?))
+diff --git a/rustc_interface/src/interface.rs b/rustc_interface/src/interface.rs
+index 95aeb1f..e0a7351 100644
+--- a/rustc_interface/src/interface.rs
++++ b/rustc_interface/src/interface.rs
+@@ -401,6 +401,14 @@ pub fn run_compiler<R: Send>(config: Config, f: impl FnOnce(&Compiler) -> R + Se
+         config.opts.sysroot.path(),
+         config.opts.unstable_opts.unstable_options,
+     );
++    // An embedded session must install its own loader. Silently falling back
++    // to the unrestricted loader here would undo the whole boundary, so
++    // refuse to start the session instead.
++    if config.opts.embedded_boundary && config.file_loader.is_none() {
++        early_dcx.early_fatal(
++            "embedded compiler boundary requires an explicit `FileLoader` in `Config`",
++        );
++    }
+     let file_loader = config.file_loader.unwrap_or_else(|| Box::new(RealFileLoader));
+     let path_mapping = config.opts.file_path_mapping();
+     let hash_kind = config.opts.unstable_opts.src_hash_algorithm(&target);
+diff --git a/rustc_parse/src/lib.rs b/rustc_parse/src/lib.rs
+index 7805994..8ae9a38 100644
+--- a/rustc_parse/src/lib.rs
++++ b/rustc_parse/src/lib.rs
+@@ -115,7 +115,10 @@ pub fn new_parser_from_file<'a>(
+     let source_file = sm.load_file(path).unwrap_or_else(|e| {
+         let msg = format!("couldn't read `{}`: {}", path.display(), e);
+         let mut err = psess.dcx().struct_fatal(msg);
+-        if let Ok(contents) = std::fs::read(path)
++        // Retry through the session loader. Reading the host path directly
++        // here bypassed `FileLoader`, so a denied path was still opened and
++        // its bytes could surface through the invalid-UTF-8 diagnostic.
++        if let Ok(contents) = sm.read_binary_for_diagnostic(path)
+             && let Err(utf8err) = std::str::from_utf8(&contents)
+         {
+             utf8_error(sm, &path.display().to_string(), sp, &mut err, utf8err, &contents);
+diff --git a/rustc_session/src/config.rs b/rustc_session/src/config.rs
+index 4492cdf..f417867 100644
+--- a/rustc_session/src/config.rs
++++ b/rustc_session/src/config.rs
+@@ -1467,6 +1467,7 @@ impl Default for Options {
+             working_dir,
+             color: ColorConfig::Auto,
+             logical_env: FxIndexMap::default(),
++            embedded_boundary: false,
+             verbose: false,
+             target_modifiers: BTreeMap::default(),
+             mitigation_coverage_map: Default::default(),
+@@ -2824,6 +2825,7 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
+         working_dir,
+         color,
+         logical_env,
++        embedded_boundary: false,
+         verbose,
+         target_modifiers: collected_options.target_modifiers,
+         mitigation_coverage_map: collected_options.mitigations,
+diff --git a/rustc_session/src/options.rs b/rustc_session/src/options.rs
+index e8e405f..365aaf6 100644
+--- a/rustc_session/src/options.rs
++++ b/rustc_session/src/options.rs
+@@ -326,6 +326,14 @@ top_level_options!(
+         /// Effective logical environment used by `env!`/`option_env!` macros
+         logical_env: FxIndexMap<String, String> [TRACKED],
+ 
++        /// Embedded-embedding boundary. When set, `env!`/`option_env!` never
++        /// read the ambient host environment for a name that `logical_env`
++        /// does not define, and session creation requires an explicit
++        /// `FileLoader`. Defaults to `false`, so ordinary compiler use is
++        /// unchanged. An embedding sets it from its callbacks before the
++        /// session exists, never from the command line.
++        embedded_boundary: bool [TRACKED],
++
+         test: bool [TRACKED],
+         error_format: ErrorOutputType [UNTRACKED],
+         diagnostic_width: Option<usize> [UNTRACKED],
+diff --git a/rustc_span/src/source_map.rs b/rustc_span/src/source_map.rs
+index 47c933e..bb02554 100644
+--- a/rustc_span/src/source_map.rs
++++ b/rustc_span/src/source_map.rs
+@@ -243,6 +243,15 @@ impl SourceMap {
+         self.file_loader.file_exists(path)
+     }
+ 
++    /// Reads a file through the session's [`FileLoader`] without adding a
++    /// `SourceFile` to the map.
++    ///
++    /// A diagnostic retry must use this instead of reading the host path
++    /// directly, so a loader that denies a path cannot be bypassed.
++    pub fn read_binary_for_diagnostic(&self, path: &Path) -> io::Result<Arc<[u8]>> {
++        self.file_loader.read_binary_file(path)
++    }
++
+     pub fn load_file(&self, path: &Path) -> io::Result<Arc<SourceFile>> {
+         let src = self.file_loader.read_file(path)?;
+         let filename = FileName::Real(self.path_mapping.to_real_filename(&self.working_dir, path));
+diff --git a/rustc_metadata/src/creader.rs b/rustc_metadata/src/creader.rs
+--- a/rustc_metadata/src/creader.rs
++++ b/rustc_metadata/src/creader.rs
+@@ -606,6 +606,12 @@
+ 
+         let Library { source, metadata } = lib;
+         let crate_root = metadata.get_root();
++        // Ordinary object metadata does not execute the library. Refuse the crate
++        // before resolving its dependencies or reaching host_dylib/dlsym, which
++        // would run arbitrary host code outside the session FileLoader.
++        if tcx.sess.opts.embedded_boundary && crate_root.is_proc_macro_crate() {
++            tcx.dcx().fatal("procedural macros are unavailable in embedded compiler sessions");
++        }
+         let host_hash = host_lib.as_ref().map(|lib| lib.metadata.get_root().hash());
+         let private_dep = self.is_private_dep(&tcx.sess.opts.externs, name, private_dep);
+ 
+diff --git a/rustc_metadata/src/locator.rs b/rustc_metadata/src/locator.rs
+--- a/rustc_metadata/src/locator.rs
++++ b/rustc_metadata/src/locator.rs
+@@ -243,6 +243,7 @@
+ pub(crate) struct CrateLocator<'a> {
+     // Immutable per-session configuration.
+     only_needs_metadata: bool,
++    embedded_boundary: bool,
+     metadata_loader: &'a dyn MetadataLoader,
+     cfg_version: &'static str,
+ 
+@@ -317,6 +318,7 @@
+         let only_needs_metadata = is_rlib || !needs_object_code;
+ 
+         CrateLocator {
++            embedded_boundary: sess.opts.embedded_boundary,
+             only_needs_metadata,
+             metadata_loader,
+             cfg_version: sess.cfg_version,
+@@ -612,6 +614,7 @@
+                 self.metadata_loader,
+                 self.cfg_version,
+                 Some(self.crate_name),
++                self.embedded_boundary,
+             ) {
+                 Ok(blob) => {
+                     if let Some(h) = self.crate_matches(crate_rejections, &blob, &lib) {
+@@ -819,7 +822,15 @@
+     loader: &dyn MetadataLoader,
+     cfg_version: &'static str,
+     crate_name: Option<Symbol>,
++    embedded_boundary: bool,
+ ) -> Result<MetadataBlob, MetadataError<'p>> {
++    // SDylib interfaces run a separate compiler before crate registration.
++    // Embedded sessions must never spawn that unrestricted host process.
++    if embedded_boundary && flavor == CrateFlavor::SDylib {
++        return Err(MetadataError::LoadFailure(
++            "SDylib interfaces are unavailable in embedded compiler sessions".to_string(),
++        ));
++    }
+     if !filename.exists() {
+         return Err(MetadataError::NotPresent(filename));
+     }
+@@ -960,7 +971,7 @@
+     cfg_version: &'static str,
+ ) -> IoResult<()> {
+     let flavor = get_flavor_from_path(path);
+-    match get_metadata_section(target, flavor, path, metadata_loader, cfg_version, None) {
++    match get_metadata_section(target, flavor, path, metadata_loader, cfg_version, None, false) {
+         Ok(metadata) => metadata.list_crate_metadata(out, ls_kinds),
+         Err(msg) => write!(out, "{msg}\n"),
+     }
+@@ -988,6 +999,6 @@
+     cfg_version: &'static str,
+ ) -> IoResult<Vec<(ProcMacroClient, ProcMacroKind)>> {
+     let metadata =
+-        get_metadata_section(target, CrateFlavor::Dylib, path, metadata_loader, cfg_version, None)
++        get_metadata_section(target, CrateFlavor::Dylib, path, metadata_loader, cfg_version, None, false)
+             .map_err(|err| io::Error::other(err.to_string()))?;
+     let stable_crate_id = metadata.get_root().stable_crate_id();

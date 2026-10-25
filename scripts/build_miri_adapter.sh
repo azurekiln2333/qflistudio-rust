@@ -9,6 +9,7 @@ source_dir=$(CDPATH='' cd -- "$1" && pwd)
 toolchain=$(CDPATH='' cd -- "$2" && pwd)
 compiler_sysroot=${QFLI_COMPILER_SYSROOT:-$toolchain}
 runtime_sysroot=${QFLI_RUNTIME_SYSROOT:-$compiler_sysroot}
+compiler_build_info=${QFLI_COMPILER_BUILD_INFO:-$runtime_sysroot/../compiler-build.json}
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 if [ ! -f "$source_dir/Cargo.toml" ] || [ ! -x "$toolchain/bin/rustc" ] || [ ! -x "$toolchain/bin/cargo" ]; then
   echo 'Miri source or matching rustc-dev toolchain is missing.' >&2
@@ -23,12 +24,27 @@ fi
 build_host=$(printf '%s\n' "$compiler_version" | sed -n 's/^host: //p')
 target=${3:-$build_host}
 build_root=${QFLI_ADAPTER_BUILD_ROOT:-${TMPDIR:-/tmp}/qfli-miri-adapter-1.98.1-$target}
+cargo_home=${CARGO_HOME:-$build_root/cargo}
 target_lib="$compiler_sysroot/lib/rustlib/$target/lib"
 if [ -z "$(find "$target_lib" -maxdepth 1 -name '*rustc_driver*' -print -quit 2>/dev/null)" ]; then
   echo "Missing matching compiler-private metadata for $target in $target_lib" >&2
   exit 2
 fi
+# A stock rustc-dev archive has the same version but lacks the boundary field.
+# Verify both private metadata and runtime artifacts before staging or Cargo.
+python3 "$repo_root/scripts/miri_build_support.py" check-compiler \
+  --compiler-build-info "$compiler_build_info" \
+  --compiler-sysroot "$compiler_sysroot" --runtime-sysroot "$runtime_sysroot" \
+  --native-host "$target"
 sh "$repo_root/scripts/check_miri_source.sh" "$source_dir"
+python3 "$repo_root/scripts/miri_build_support.py" check-build-root \
+  --build-root "$build_root" --input-root "$source_dir" --input-root "$toolchain" \
+  --input-root "$compiler_sysroot" --input-root "$runtime_sysroot" \
+  --input-root "$compiler_build_info" --input-root "$repo_root/native/miri_adapter"
+python3 "$repo_root/scripts/miri_build_support.py" check-build-root \
+  --build-root "$cargo_home" --input-root "$source_dir" --input-root "$toolchain" \
+  --input-root "$compiler_sysroot" --input-root "$runtime_sysroot" \
+  --input-root "$compiler_build_info" --input-root "$repo_root/native/miri_adapter"
 mkdir -p "$build_root"
 build_root=$(CDPATH='' cd -- "$build_root" && pwd)
 stage=$(mktemp -d "$build_root/source.XXXXXX")
@@ -44,7 +60,7 @@ for path in Path(sys.argv[1]).rglob('*.rs'):
         path.write_bytes(content.replace(b'\r\n', b'\n'))
 PY
 patch -F 0 -d "$stage/miri" -p1 < "$repo_root/native/patches/miri-1.98.1-embedded-session.patch"
-export CARGO_HOME="${CARGO_HOME:-$build_root/cargo}"
+export CARGO_HOME="$cargo_home"
 export PATH="$toolchain/bin:$PATH"
 export RUSTC_BOOTSTRAP=1
 export CARGO_TARGET_DIR="$build_root/target"
@@ -128,6 +144,7 @@ cargo -Zdual-proc-macros rustc --manifest-path "$stage/adapter/Cargo.toml" \
 cargo metadata --manifest-path "$stage/adapter/Cargo.toml" --locked \
   --offline --format-version=1 --filter-platform "$target" > "$build_root/dependencies-$target.json"
 python3 "$repo_root/scripts/miri_build_support.py" --toolchain "$toolchain" \
+  --compiler-build-info "$compiler_build_info" \
   --compiler-sysroot "$compiler_sysroot" --runtime-sysroot "$runtime_sysroot" \
   --miri-source "$source_dir" --native-host "$target" \
   --adapter "$build_root/target/$target/debug/$library" \

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bootstrap matching compiler-private libraries for Android and iOS hosts."""
+"""Bootstrap patched compiler-private libraries for Linux, OHOS and mobile hosts."""
 
 import argparse
 import json
@@ -16,10 +16,14 @@ import uuid
 
 from miri_build_support import (
     HOSTS, RUST_COMMIT, RUST_VERSION, SOURCE_SHA256, compiler_identity,
-    run, sha256, source_revision, write_json,
+    COMPILER_BOUNDARY_KIND, COMPILER_BOUNDARY_PATCH_SHA256, compiler_boundary_patch,
+    compiler_patch_hunks, compiler_artifacts, tree_identity, verify_compiler_build,
+    run, sha256, source_revision, write_json, ensure_disjoint_build_root,
 )
 
-MOBILE_HOSTS = [host for host, (platform, _) in HOSTS.items() if platform in ("android", "ios")]
+BOOTSTRAP_HOSTS = [host for host, (platform, _) in HOSTS.items()
+                   if platform in ("linux", "ohos", "android", "ios")]
+LINUX_BUILD_HOSTS = ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu")
 
 
 def executable(path):
@@ -107,6 +111,97 @@ def apple_tools(args, build_host):
     }
 
 
+
+def local_llvm_tools(args, sdk=None):
+    """Select only explicit tools or files in the selected OHOS native SDK."""
+    tools = {}
+    for key, name in (("cc", "clang"), ("cxx", "clang++"), ("ar", "llvm-ar"),
+                      ("ranlib", "llvm-ranlib"), ("ld_lld", "ld.lld")):
+        selected = getattr(args, key, None)
+        if selected is None and sdk is not None:
+            selected = sdk / "llvm/bin" / name
+        if selected is None:
+            option = key.replace("_", "-")
+            raise ValueError(f"Supply --{option} with a preinstalled local LLVM tool path")
+        tools[key] = executable(selected)
+    return tools
+
+
+def linux_tools(args, build_host):
+    if build_host not in LINUX_BUILD_HOSTS:
+        raise ValueError("Linux compiler bootstrap requires a Linux GNU build host")
+    sysroot = getattr(args, "linux_sysroot", None)
+    if args.native_host != build_host and sysroot is None:
+        raise ValueError("Cross-architecture Linux bootstrap requires --linux-sysroot")
+    flags = [f"--target={args.native_host}", "-fPIC"]
+    if sysroot is not None:
+        sysroot = Path(sysroot).resolve()
+        if not (sysroot / "usr/include").is_dir():
+            raise ValueError("Linux sysroot is incomplete (usr/include is missing)")
+        flags.append(f"--sysroot={sysroot}")
+    local = local_llvm_tools(args)
+    flags.append(f"-fuse-ld={local['ld_lld']}")
+    return {
+        "cc": wrapper(args.build_root / "bin/target-clang", local["cc"], flags),
+        "cxx": wrapper(args.build_root / "bin/target-clang++", local["cxx"], flags),
+        "linker": wrapper(args.build_root / "bin/target-linker", local["cc"], flags),
+        "ar": local["ar"], "ranlib": local["ranlib"],
+        "compilerTarget": args.native_host, "sysroot": str(sysroot) if sysroot else None,
+        "linkerExecutable": local["ld_lld"],
+    }
+
+
+def ohos_tools(args, build_host):
+    if build_host not in LINUX_BUILD_HOSTS:
+        raise ValueError("OHOS compiler bootstrap requires a Linux GNU build host")
+    if getattr(args, "ohos_sdk", None) is None:
+        raise ValueError("OHOS hosts require --ohos-sdk pointing to a local native SDK")
+    sdk = Path(args.ohos_sdk).resolve()
+    target = args.native_host.replace("-unknown", "")
+    sysroot = sdk / "sysroot"
+    if not (sysroot / "usr/lib" / target / "libc.so").is_file():
+        raise ValueError(f"OHOS native SDK is incomplete (missing {target}/libc.so)")
+    libraries = sdk / "llvm/lib" / target
+    if not libraries.is_dir():
+        raise ValueError(f"OHOS native SDK target library directory is missing: {libraries}")
+    resource = getattr(args, "ohos_resource_dir", None)
+    if resource is None:
+        candidates = sorted(path for path in (sdk / "llvm/lib/clang").glob("*")
+                            if (path / "lib" / target / "libclang_rt.builtins.a").is_file())
+        if len(candidates) != 1:
+            raise ValueError("Select --ohos-resource-dir with exactly matching local builtins")
+        resource = candidates[0]
+    resource = Path(resource).resolve()
+    if (not resource.is_relative_to(sdk / "llvm/lib/clang")
+            or not (resource / "lib" / target / "libclang_rt.builtins.a").is_file()):
+        raise ValueError("OHOS Clang resource directory lacks matching SDK builtins")
+    local = local_llvm_tools(args, sdk)
+    flags = [f"--target={target}", f"--sysroot={sysroot}", "-resource-dir", str(resource),
+             f"-L{libraries}", "-D__MUSL__", "-fPIC", f"-fuse-ld={local['ld_lld']}"]
+    return {
+        "cc": wrapper(args.build_root / "bin/target-clang", local["cc"], flags),
+        "cxx": wrapper(args.build_root / "bin/target-clang++", local["cxx"], flags),
+        "linker": wrapper(args.build_root / "bin/target-linker", local["cc"],
+                          [*flags, "-Wl,-z,max-page-size=16384"]),
+        "ar": local["ar"], "ranlib": local["ranlib"],
+        "sdk": str(sdk), "sysroot": str(sysroot), "resourceDir": str(resource),
+        "compilerTarget": target, "linkerExecutable": local["ld_lld"],
+    }
+
+
+def native_tools(args, build_host):
+    platform = HOSTS[args.native_host][0]
+    if platform == "linux":
+        return linux_tools(args, build_host)
+    if platform == "ohos":
+        return ohos_tools(args, build_host)
+    if platform == "android":
+        return android_tools(args, build_host)
+    if platform == "ios":
+        return apple_tools(args, build_host)
+    raise ValueError(f"Compiler bootstrap is unsupported for {args.native_host}")
+
+
 def complete_source(args):
     if args.source:
         source = args.source.resolve()
@@ -142,6 +237,81 @@ def complete_source(args):
                 extracted.rename(source)
     source_revision(source, complete=True)
     return source
+
+
+
+def prepare_compiler_source(original, build_root):
+    """Patch a private complete copy, never the caller's compiler checkout."""
+    original = Path(original).resolve(strict=True)
+    build_root = Path(build_root).resolve(strict=True)
+    if build_root.is_relative_to(original):
+        raise ValueError("Compiler build root must be outside its input source")
+    source_revision(original, complete=True)
+    patch = compiler_boundary_patch()
+    hunks = compiler_patch_hunks(patch)
+    inputs = tree_identity(original)
+    destination = build_root / "patched-compiler-source"
+    marker = destination / ".qfli-compiler-source.json"
+    if destination.is_symlink() or getattr(destination, "is_junction", lambda: False)():
+        raise ValueError("Owned compiler source destination cannot be a link")
+    if destination.exists():
+        if not marker.is_file():
+            raise ValueError("Existing patched source has no provenance. Use a fresh build root")
+        provenance = json.loads(marker.read_text(encoding="utf-8"))
+        if (provenance.get("kind") != COMPILER_BOUNDARY_KIND
+                or provenance.get("sourceCommit") != RUST_COMMIT
+                or provenance.get("patchSha256") != COMPILER_BOUNDARY_PATCH_SHA256
+                or provenance.get("inputTree") != inputs
+                or provenance.get("patchedTree") != tree_identity(destination)):
+            raise ValueError("Existing patched source differs from its reviewed inputs")
+        changes = provenance.get("patchedFiles", [])
+        expected_paths = ["compiler/" + relative for relative, _ in hunks]
+        if (not isinstance(changes, list) or any(not isinstance(row, dict) for row in changes)
+                or [row.get("path") for row in changes] != expected_paths
+                or any(row.get("beforeSha256") != sha256(original / row["path"])
+                       or row.get("afterSha256") != sha256(destination / row["path"])
+                       for row in changes)):
+            raise ValueError("Existing patched source file provenance differs from actual inputs")
+        return destination, provenance
+    with tempfile.TemporaryDirectory(prefix="compiler-source.", dir=build_root) as temporary:
+        staged = Path(temporary) / "source"
+        shutil.copytree(original, staged, ignore=shutil.ignore_patterns(".git"))
+        if tree_identity(staged) != inputs or tree_identity(original) != inputs:
+            raise ValueError("Compiler source changed while preparing its owned copy")
+        changes = []
+        outputs = []
+        for relative, file_hunks in hunks:
+            path = staged / "compiler" / relative
+            if not path.resolve().is_relative_to(staged):
+                raise ValueError("Compiler patch path escapes the owned source")
+            before = path.read_bytes()
+            lines = before.decode("utf-8").splitlines()
+            output = []
+            cursor = 0
+            for old_start, new_start, old_lines, new_lines in file_hunks:
+                if old_start < cursor or lines[old_start:old_start + len(old_lines)] != old_lines:
+                    raise ValueError(f"Compiler patch context differs: {relative}:{old_start + 1}")
+                output.extend(lines[cursor:old_start])
+                if len(output) != new_start:
+                    raise ValueError(f"Compiler patch output position differs: {relative}")
+                output.extend(new_lines)
+                cursor = old_start + len(old_lines)
+            output.extend(lines[cursor:])
+            after = ("\n".join(output) + ("\n" if before.endswith(b"\n") else "")).encode("utf-8")
+            outputs.append((path, after))
+            changes.append({"path": "compiler/" + relative, "beforeSha256": sha256(path)})
+        # All patched files must match before the first write, even in the owned copy.
+        for (path, after), change in zip(outputs, changes):
+            path.write_bytes(after)
+            change["afterSha256"] = sha256(path)
+        (staged / "git-commit-hash").write_text(RUST_COMMIT + "\n", encoding="ascii")
+        provenance = {"kind": COMPILER_BOUNDARY_KIND, "sourceCommit": RUST_COMMIT,
+                      "patchSha256": COMPILER_BOUNDARY_PATCH_SHA256,
+                      "inputSource": str(original), "inputTree": inputs,
+                      "patchedFiles": changes, "patchedTree": tree_identity(staged)}
+        write_json(staged / marker.name, provenance)
+        staged.rename(destination)
+    return destination, provenance
 
 
 def bootstrap_config(args, build_host, tools):
@@ -180,7 +350,7 @@ def require_bootstrap_inputs(toolchain, native_host, build_host):
             "install the pinned target standard library into the build toolchain before bootstrap"
         )
     private = Path(toolchain) / "lib/rustlib" / build_host / "lib"
-    if any(private.glob("librustc_driver_impl-*.rmeta")):
+    if any(private.glob("*rustc_*.rmeta")) or any(private.glob("*rustc_*.rlib")):
         raise ValueError(
             "Bootstrap requires a clean compiler toolchain without rustc-dev private libraries; "
             "use a separate minimal pinned toolchain so source-built metadata cannot conflict"
@@ -191,6 +361,11 @@ def build_embedded_backend(args, source, private, runtime, tools, environment):
     target_lib = private / "lib/rustlib" / args.native_host / "lib"
     backend_environment = dict(environment, CARGO_TARGET_DIR=str(args.build_root / "backend-target"))
     backend_environment["CARGO_BUILD_JOBS"] = str(args.jobs)
+    backend_environment["CARGO_NET_OFFLINE"] = "true"
+    target_key = args.native_host.replace("-", "_")
+    for key, tool in (("CC", "cc"), ("CXX", "cxx"), ("AR", "ar"), ("RANLIB", "ranlib")):
+        backend_environment[f"{key}_{target_key}"] = str(tools[tool])
+    backend_environment[f"CARGO_TARGET_{target_key.upper()}_LINKER"] = str(tools["linker"])
     flags = [
         f"--sysroot={private}", "-Cprefer-dynamic", "-Zdual-proc-macros",
         "-C", f"linker={tools['linker']}", "-L", f"native={target_lib}",
@@ -234,14 +409,52 @@ def build_embedded_backend(args, source, private, runtime, tools, environment):
     return installed
 
 
+
+def validate_build_paths(args):
+    """Reject input/output ancestry before any writes or executable queries.
+
+    Native Path ancestry preserves Windows case semantics. Resolve directory
+    links first, and protect both the selected and resolved local-tool parents:
+    a file symlink must not let generated wrappers overwrite its selected path.
+    Internally extracted source is owned output, not a caller-provided input.
+    """
+    build_root = Path(args.build_root).resolve()
+    inputs = []
+    for key in ("toolchain", "source", "ndk", "ohos_sdk", "ohos_resource_dir", "linux_sysroot"):
+        selected = getattr(args, key, None)
+        if selected is not None:
+            inputs.append((key, Path(selected).resolve()))
+    for key in ("cc", "cxx", "ar", "ranlib", "ld_lld"):
+        selected = getattr(args, key, None)
+        if selected is not None:
+            selected = Path(selected)
+            inputs.append((key, selected.absolute().parent.resolve()))
+            inputs.append((key, selected.resolve().parent))
+    for key, input_root in inputs:
+        try:
+            ensure_disjoint_build_root(build_root, input_root)
+        except ValueError as error:
+            option = key.replace("_", "-")
+            raise ValueError(f"--build-root overlaps --{option} input directory: {input_root}") from error
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--native-host", choices=MOBILE_HOSTS, required=True)
+    parser.add_argument("--native-host", choices=BOOTSTRAP_HOSTS, required=True)
     parser.add_argument("--toolchain", type=Path, required=True)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--download-source", action="store_true")
     parser.add_argument("--build-root", type=Path, required=True)
     parser.add_argument("--ndk", type=Path)
+    parser.add_argument("--ohos-sdk", type=Path,
+                        help="Local native SDK directory containing llvm/ and sysroot/")
+    parser.add_argument("--ohos-resource-dir", type=Path,
+                        help="Matching resource directory under the SDK llvm/lib/clang/")
+    parser.add_argument("--linux-sysroot", type=Path,
+                        help="Local target sysroot, required for Linux cross-architecture builds")
+    for option in ("cc", "cxx", "ar", "ranlib", "ld-lld"):
+        parser.add_argument("--" + option, type=Path,
+                            help="Explicit preinstalled LLVM tool for Linux/OHOS")
     parser.add_argument("--android-api", type=int, default=21)
     parser.add_argument("--ios-deployment-target", default="13.0")
     parser.add_argument("--jobs", type=int, default=4)
@@ -251,22 +464,29 @@ def main():
     args.build_root = args.build_root.resolve()
     if args.jobs < 1:
         parser.error("--jobs must be positive")
-    if args.source and args.build_root.is_relative_to(args.source.resolve()):
-        parser.error("--build-root must be outside the Rust source checkout")
+    try:
+        validate_build_paths(args)
+    except ValueError as error:
+        parser.error(str(error))
     fields = compiler_identity(args.toolchain)
     args.build_root.mkdir(parents=True, exist_ok=True)
     (args.build_root / "bin").mkdir(exist_ok=True)
-    source = complete_source(args)
-    tools = (android_tools(args, fields["host"]) if "android" in args.native_host
-             else apple_tools(args, fields["host"]))
+    tools = native_tools(args, fields["host"])
+    input_source = complete_source(args)
+    source, source_provenance = prepare_compiler_source(input_source, args.build_root)
     config = args.build_root / "bootstrap.toml"
     config.write_text(bootstrap_config(args, fields["host"], tools), encoding="utf-8")
     if args.configure_only:
         print(f"Configured {args.native_host}: {config}; no runtime was built")
         return
 
+    # Reject stale or stock build outputs rather than mixing private metadata.
+    for folder in ("build", "backend-target", "runtime"):
+        if (args.build_root / folder).exists():
+            raise ValueError(f"Existing {folder} output requires a fresh compiler build root")
     require_bootstrap_inputs(args.toolchain, args.native_host, fields["host"])
-    environment = dict(os.environ, RUSTC_BOOTSTRAP="1", CARGO_HOME=str(args.build_root / "cargo"))
+    environment = dict(os.environ, RUSTC_BOOTSTRAP="1", CARGO_HOME=str(args.build_root / "cargo"),
+                       CARGO_NET_OFFLINE="true")
     environment["PATH"] = str(args.toolchain / "bin") + os.pathsep + environment.get("PATH", "")
     for key in ("RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
         environment.pop(key, None)
@@ -303,13 +523,30 @@ def main():
     if not any(runtime_lib.glob("*rustc_driver*")):
         raise ValueError("Bootstrap did not produce its native driver library")
     backend = build_embedded_backend(args, source, private, runtime, tools, environment)
-    write_json(args.build_root / "compiler-build.json", {
-        "schemaVersion": 1, "rustVersion": RUST_VERSION, "rustCommit": RUST_COMMIT,
+    if tree_identity(source) != source_provenance["patchedTree"]:
+        raise ValueError("Patched compiler source changed during the build")
+    build_record = args.build_root / "compiler-build.json"
+    write_json(build_record, {
+        "schemaVersion": 2, "status": "built", "rustVersion": RUST_VERSION, "rustCommit": RUST_COMMIT,
+        "compilerBoundary": source_provenance,
+        "compilerArtifacts": compiler_artifacts(private, runtime),
+        "bootstrapConfig": {"path": str(config), "sha256": sha256(config)},
+        "bootstrapCompiler": {"identity": fields, "path": str(args.toolchain),
+                              "sha256": sha256(args.toolchain / "bin" /
+                                               ("rustc.exe" if os.name == "nt" else "rustc"))},
         "nativeHost": args.native_host, "buildHost": fields["host"],
         "runtimeSysroot": str(runtime), "compilerSysroot": str(private),
         "codegenBackend": str(backend), "source": str(source),
         "tools": {name: str(value) if isinstance(value, Path) else value for name, value in tools.items()},
     })
+    try:
+        verify_compiler_build(build_record, private, runtime, args.native_host)
+    except (OSError, ValueError):
+        # Keep failed-build evidence, but never leave a consumable built record.
+        info = json.loads(build_record.read_text(encoding="utf-8"))
+        info["status"] = "rejected"
+        write_json(build_record, info)
+        raise
     print(f"Runtime compiler sysroot: {runtime}")
     print(f"Adapter compiler-private sysroot: {private}")
     print(f"Backend: {backend}")

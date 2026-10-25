@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 
-from miri_build_support import GUEST_TARGET, HOSTS, RUST_COMMIT, RUST_VERSION, run, sha256, source_revision, write_json
+from miri_build_support import GUEST_TARGET, HOSTS, RUST_COMMIT, RUST_VERSION, run, sha256, source_revision, verify_adapter_build, write_json
 
 REPOSITORY = Path(__file__).resolve().parent.parent
 WINDOWS_SYSTEM = {
@@ -219,6 +219,9 @@ def collect_libraries(args, build_info):
             if sha256(path) != sha256(libraries[key]["source"]):
                 raise ValueError(f"Conflicting native libraries with the same name: {name}")
             continue
+        observed_hash = sha256(path)
+        if role == "adapter" and observed_hash != build_info["adapter"]["sha256"]:
+            raise ValueError("Adapter changed after its build record was verified")
         binary = inspect_library(path, args.native_host)
         if platform == "ios":
             deployment = tuple(int(part) for part in args.apple_deployment_target.split("."))
@@ -228,9 +231,10 @@ def collect_libraries(args, build_info):
         if platform in ("android", "linux") and any("/" in needed or "\\" in needed for needed in binary["dependencies"]):
             raise ValueError(f"ELF dependencies must use relocatable SONAMEs: {name}")
         if "rustc_driver" in name or "rustc_codegen" in name or name.startswith(("libstd-", "std-", "libLLVM", "LLVM")):
-            if not any(row["name"] == path.name and row["sha256"] == sha256(path) for row in compiler_records):
+            if not any(row["name"] == path.name and row["sha256"] == observed_hash for row in compiler_records):
                 raise ValueError(f"Compiler library differs from the pinned build record: {name}")
-        libraries[key] = {"name": name, "source": path, "role": role, "binary": binary}
+        libraries[key] = {"name": name, "source": path, "role": role, "binary": binary,
+                          "sha256": observed_hash}
         for needed in binary["dependencies"]:
             if is_system_library(needed, platform):
                 continue
@@ -309,6 +313,13 @@ def framework_name(name):
     return re.sub(r"[^A-Za-z0-9_]", "_", stem)
 
 
+def copy_verified_native(row, destination):
+    """Copy the observed native bytes before any platform-specific transform."""
+    shutil.copy2(row["source"], destination)
+    if sha256(destination) != row["sha256"]:
+        raise ValueError(f"Native input changed during packaging: {row['name']}")
+
+
 def package_frameworks(libraries, destination, args):
     if sys.platform != "darwin":
         raise ValueError("Apple frameworks must be repaired and signed on macOS with Xcode")
@@ -322,7 +333,7 @@ def package_frameworks(libraries, destination, args):
         framework = destination / f"{name}.framework"
         framework.mkdir()
         executable = framework / name
-        shutil.copy2(row["source"], executable)
+        copy_verified_native(row, executable)
         executable.chmod(0o755)
         plist = {
             "CFBundleIdentifier": f"com.azurekiln.qfli.runtime.{name.replace('_', '-').lower()}",
@@ -385,6 +396,10 @@ def main():
         raise ValueError("Build record is not for the pinned Rust compiler")
     if args.native_host not in HOSTS or HOSTS[args.native_host][0] == "ohos":
         raise ValueError("Use package_miri_ohos.ps1 for existing OHOS schema-1 packages")
+    # The upstream version is shared by stock and patched private libraries.
+    # Verify the exact rebuilt boundary and adapter before reading dependencies.
+    info = verify_adapter_build(args.build_info, Path(info["adapter"]["path"]),
+                                native_host=args.native_host)
     platform, architecture = HOSTS[args.native_host]
     dependency_info = info["dependencyMetadata"]
     metadata_path = Path(dependency_info["path"])
@@ -413,12 +428,16 @@ def main():
         else:
             for row in libraries:
                 row["path"] = row["name"]
-                shutil.copy2(row["source"], staged / row["path"])
+                copy_verified_native(row, staged / row["path"])
         native_entries = [{"name": row["name"], "path": row["path"], "role": row["role"],
                            "size": (staged / row["path"]).stat().st_size,
+                           "sourceSha256": row["sha256"],
                            "sha256": sha256(staged / row["path"])} for row in libraries]
         manifest = {
             "schemaVersion": 2, "platform": platform, "architecture": architecture,
+            "compilerBoundary": info["compilerBoundary"],
+            "compilerBuild": info["compilerBuild"],
+            "adapterBuild": {"sha256": sha256(args.build_info)},
             "rustVersion": RUST_VERSION, "rustCommit": RUST_COMMIT,
             "nativeHost": args.native_host, "guestTarget": GUEST_TARGET,
             "libraryName": next(row["path"] for row in libraries if row["role"] == "adapter"),
