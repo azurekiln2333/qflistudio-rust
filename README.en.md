@@ -26,13 +26,13 @@ It never starts Cargo, build scripts or proc macros.
 
 When analysis fails, it reports the reason it is unavailable.
 
-It never presents failed analysis as a result with no errors.
+It never presents a failed analysis as a clean result.
 
 The tools page provides Rust offline tools directly.
 
 The integer tools handle prefixes, suffixes and type bounds.
 
-Bit operations first convert by the selected type.
+Bitwise operations first convert the operands to the selected type.
 The results use arbitrary precision.
 
 The string tools distinguish byte count from Unicode scalar count.
@@ -49,9 +49,9 @@ On desktop, Run selects the Cargo target for the configured entry.
 
 For an unregistered entry, it compiles a standalone file with `rustc`.
 
-Long press Run to run the current saved file.
+Long-press Run to run the current saved file.
 
-This keeps the configured entry unchanged.
+Long-pressing Run does not change the configured entry.
 
 In the desktop terminal, `rustc` and `cargo` are real commands.
 
@@ -88,9 +88,9 @@ Mobile depends on a packaged upstream rustc/Miri engine.
 
 Android and OHOS have native manifests and packaging scripts.
 
-iOS has source build scripts only.
+The repository provides iOS build and packaging scripts.
 
-iOS packaging and device verification remain pending.
+iOS package artifacts and device verification remain pending.
 
 Mobile provides no compiler command line.
 

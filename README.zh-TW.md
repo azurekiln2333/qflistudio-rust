@@ -39,7 +39,7 @@ Cargo、建置腳本與程序巨集都不會啟動。
 
 專案檢查工具只讀中繼資料，不編譯。
 
-桌面端的專案檢查用 `cargo metadata` 取得中繼資料。
+桌面端檢查呼叫真實的 `cargo metadata`。
 
 行動端只讀專案裡的 `Cargo.toml`。
 
@@ -88,9 +88,9 @@ Rust 專案範本會帶上 `Cargo.toml`。
 
 Android 與 OHOS 已有原生清單與封裝腳本。
 
-iOS 僅提供原始碼建置腳本。
+儲存庫提供 iOS 建置與封裝腳本。
 
-iOS 的封裝與裝置驗證待完成。
+iOS 封裝產物與裝置驗證待完成。
 
 行動端不提供編譯器命令列。
 
@@ -149,11 +149,13 @@ flutter run
 
 它優先於儲存庫內的固定工具鏈。
 
+此變數不設定程式執行器。
+
 ## 內容檢查
 
 教學與範例一一配對，共 166 對。
 
-作者源改動後執行這些命令：
+原始檔改動後執行這些命令：
 
 ```text
 python scripts/generate_rust_content.py
@@ -166,7 +168,7 @@ python -m unittest discover -s scripts -p test_rust_content.py
 
 它執行每個程式。
 
-它比對每個程式的宣告輸出。
+它再比對程式輸出與宣告輸出。
 
 它同時離線檢查附帶專案。
 
