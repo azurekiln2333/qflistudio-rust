@@ -435,9 +435,9 @@
     "prerequisites": [
       "012"
     ],
-    "explain": "性能测量最怕噪声与优化消除。标准库提供 `std::time::Instant` 记录单调时钟，但若编译器发现结果未被使用，会把整个计算优化掉，因此要用 `std::hint::black_box` 强制保留。专业基准库（如 criterion）会做自动预热、多轮采样、统计显著性检验与异常值剔除；它的核心方法论可以手工近似：先跑若干次预热让缓存与分支预测进入稳态，再采集多轮样本，报告最小值或中位数而非单次值。还要固定输入规模、记录构建档（debug 与 release 差距往往数倍）、避免在计时区间里做 I/O。基准结论必须带“环境 + 档位 + 输入规模”三个前提，否则不可信。",
-    "code": "use std::hint::black_box;\nuse std::time::Instant;\n\nfn sum_of_squares(n: u64) -> u64 {\n    let mut acc = 0u64;\n    for i in 1..=n {\n        acc += i * i;\n    }\n    acc\n}\n\nfn bench(label: &str, rounds: usize, mut f: impl FnMut() -> u64) {\n    // 预热：让缓存与分支预测进入稳态\n    for _ in 0..3 {\n        black_box(f());\n    }\n    let mut best = u128::MAX;\n    for _ in 0..rounds {\n        let start = Instant::now();\n        black_box(f());\n        let elapsed = start.elapsed().as_nanos();\n        if elapsed < best {\n            best = elapsed;\n        }\n    }\n    println!(\"{}: {} 轮采样完成\", label, rounds);\n    let _ = best;\n}\n\nfn main() {\n    bench(\"sum_of_squares(10000)\", 5, || sum_of_squares(10_000));\n    println!(\"verify(sum_of_squares(1000)) = {}\", sum_of_squares(1000));\n    println!(\"计时取最小值, 输入与档位固定才可比较\");\n}\n",
-    "output": "sum_of_squares(10000): 5 轮采样完成\nverify(sum_of_squares(1000)) = 333833500\n计时取最小值, 输入与档位固定才可比较\n",
+    "explain": "性能测量最怕噪声与优化消除。标准库提供 `std::time::Instant` 记录单调时钟。编译器若发现程序不使用该结果，会把整个计算优化掉。因此要用 `std::hint::black_box` 强制保留。专业基准库（如 criterion）会做自动预热、多轮采样、统计显著性检验与异常值剔除。它的核心方法论可以手工近似：先跑多次预热让缓存与分支预测进入稳态。再采集多轮样本。报告最小值或中位数而非单次值。还要固定输入规模。还要记录构建档（debug 与 release 差距往往数倍）。还要避免在计时区间里做 I/O。基准结论必须带“环境 + 档位 + 输入规模”三个前提，否则不可信。 本例在移动解释器中用 100 个元素保留预热、多轮采样与结果校验的完整流程。Miri 的单调时钟是虚拟时钟，不能用它评价手机硬件性能。正式测量应在桌面原生 release 构建中扩大输入规模，并记录环境。",
+    "code": "use std::hint::black_box;\nuse std::time::Instant;\n\nfn sum_of_squares(n: u64) -> u64 {\n    let mut acc = 0u64;\n    for i in 1..=n {\n        acc += i * i;\n    }\n    acc\n}\n\nfn bench(label: &str, rounds: usize, mut f: impl FnMut() -> u64) {\n    // 预热：让缓存与分支预测进入稳态\n    for _ in 0..3 {\n        black_box(f());\n    }\n    let mut best = u128::MAX;\n    for _ in 0..rounds {\n        let start = Instant::now();\n        black_box(f());\n        let elapsed = start.elapsed().as_nanos();\n        if elapsed < best {\n            best = elapsed;\n        }\n    }\n    println!(\"{}: {} 轮采样完成\", label, rounds);\n    let _ = best;\n}\n\nfn main() {\n    bench(\"sum_of_squares(100)\", 5, || sum_of_squares(100));\n    println!(\"verify(sum_of_squares(1000)) = {}\", sum_of_squares(1000));\n    println!(\"计时取最小值, 输入与档位固定才可比较\");\n}\n",
+    "output": "sum_of_squares(100): 5 轮采样完成\nverify(sum_of_squares(1000)) = 333833500\n计时取最小值, 输入与档位固定才可比较\n",
     "pitfalls": [
       "不写 black_box：优化器可能删除未使用的计算，测出的是 0 ns 假象。",
       "只测一次就下结论：单次结果受调度与缓存影响极大，至少要预热后多轮取最小值或中位数。",
@@ -451,9 +451,9 @@
     "runtime": "cargo",
     "files": {
       "Cargo.toml": "[package]\nname = \"lesson-013-bench\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-      "src/main.rs": "use std::hint::black_box;\nuse std::time::Instant;\n\nfn sum_of_squares(n: u64) -> u64 {\n    let mut acc = 0u64;\n    for i in 1..=n {\n        acc += i * i;\n    }\n    acc\n}\n\nfn bench(label: &str, rounds: usize, mut f: impl FnMut() -> u64) {\n    // 预热：让缓存与分支预测进入稳态\n    for _ in 0..3 {\n        black_box(f());\n    }\n    let mut best = u128::MAX;\n    for _ in 0..rounds {\n        let start = Instant::now();\n        black_box(f());\n        let elapsed = start.elapsed().as_nanos();\n        if elapsed < best {\n            best = elapsed;\n        }\n    }\n    println!(\"{}: {} 轮采样完成\", label, rounds);\n    let _ = best;\n}\n\nfn main() {\n    bench(\"sum_of_squares(10000)\", 5, || sum_of_squares(10_000));\n    println!(\"verify(sum_of_squares(1000)) = {}\", sum_of_squares(1000));\n    println!(\"计时取最小值, 输入与档位固定才可比较\");\n}\n"
+      "src/main.rs": "use std::hint::black_box;\nuse std::time::Instant;\n\nfn sum_of_squares(n: u64) -> u64 {\n    let mut acc = 0u64;\n    for i in 1..=n {\n        acc += i * i;\n    }\n    acc\n}\n\nfn bench(label: &str, rounds: usize, mut f: impl FnMut() -> u64) {\n    // 预热：让缓存与分支预测进入稳态\n    for _ in 0..3 {\n        black_box(f());\n    }\n    let mut best = u128::MAX;\n    for _ in 0..rounds {\n        let start = Instant::now();\n        black_box(f());\n        let elapsed = start.elapsed().as_nanos();\n        if elapsed < best {\n            best = elapsed;\n        }\n    }\n    println!(\"{}: {} 轮采样完成\", label, rounds);\n    let _ = best;\n}\n\nfn main() {\n    bench(\"sum_of_squares(100)\", 5, || sum_of_squares(100));\n    println!(\"verify(sum_of_squares(1000)) = {}\", sum_of_squares(1000));\n    println!(\"计时取最小值, 输入与档位固定才可比较\");\n}\n"
     },
-    "projectOutput": "sum_of_squares(10000): 5 轮采样完成\nverify(sum_of_squares(1000)) = 333833500\n计时取最小值, 输入与档位固定才可比较\n",
+    "projectOutput": "sum_of_squares(100): 5 轮采样完成\nverify(sum_of_squares(1000)) = 333833500\n计时取最小值, 输入与档位固定才可比较\n",
     "verify": "build"
   },
   {
@@ -2019,7 +2019,7 @@
     "prerequisites": [
       "056"
     ],
-    "explain": "在引用上匹配时存在“默认绑定模式”：匹配 `&T` 时绑定默认是引用（`ref`），匹配 `&mut T` 时默认是 `ref mut`，因此 `match &opt { Some(x) => ... }` 中 `x` 是 `&T`。旧代码里显式写 `ref`/`ref mut`，现代 Rust 更推荐在模式上加 `&`（如 `Some(&x)`）表达意图，或让绑定模式自动推断。若要移动内部值，必须先把引用解引用为拥有型（如 `*s` 或对拥有值匹配）。常见错误：在 `match &some_option { Some(s) => consume(s) }` 中把 `s` 当拥有型传走，实际它是引用，会报类型错误。使用 `ref` 显式声明也能让意图清晰。要点：匹配 `&mut` 时通过 `ref mut` 可获得可变借用；不要在借用上尝试移出非 Copy 数据。",
+    "explain": "在引用上匹配时存在“默认绑定模式”：匹配 `&T` 时绑定默认是引用（`ref`），匹配 `&mut T` 时默认是 `ref mut`，因此 `match &opt { Some(x) => ... }` 中 `x` 是 `&T`。旧代码里显式写 `ref`/`ref mut`，现代 Rust 更推荐在模式上加 `&`（如 `Some(&x)`）表达意图，或让绑定模式自动推断。若要移动内部值，必须先把引用解引用为拥有型（如 `*s` 或对拥有值匹配）。常见错误：在 `match &some_option { Some(s) => consume(s) }` 中把 `s` 当拥有型传走，实际它是引用，会报类型错误。使用 `ref` 显式声明也能让意图清晰。要点：匹配 `&mut` 时通过 `ref mut` 可获得可变借用。不要在借用上尝试移出非 Copy 数据。 Rust 2024 中，默认绑定模式已经是引用时不能再写冗余的 ref。本题显式匹配 Some(&(ref name, ref age))：& 解构元组引用，ref 再借用字段，既不移动 String，也明确展示显式绑定。",
     "code": "#[derive(Debug)]\nstruct Config {\n    name: String,\n    retries: u8,\n}\n\nfn describe(config: &Option<Config>) -> String {\n    // 匹配 &Option<Config>，绑定默认是引用\n    match config {\n        Some(c) => format!(\"name={} retries={}\", c.name, c.retries),\n        None => String::from(\"<none>\"),\n    }\n}\n\nfn bump_retries(config: &mut Option<Config>) {\n    match config {\n        Some(c) => {\n            // c 是 &mut Config\n            c.retries += 1;\n        }\n        None => {}\n    }\n}\n\nfn main() {\n    let config = Some(Config { name: String::from(\"svc\"), retries: 2 });\n    println!(\"{}\", describe(&config));\n    println!(\"None -> {}\", describe(&None));\n\n    let mut mutable = config;\n    bump_retries(&mut mutable);\n    println!(\"after bump = {:?}\", mutable);\n}\n",
     "output": "name=svc retries=2\nNone -> <none>\nafter bump = Some(Config { name: \"svc\", retries: 3 })\n",
     "pitfalls": [
@@ -2030,7 +2030,7 @@
     "exercise": {
       "prompt": "用 `ref` 显式绑定写函数 `first_name(&[(String, u32)]) -> Option<&str>`，返回第一个元组的名字切片；在 main 中用两条记录测试。",
       "hint": "`match people.first() { Some((name, _)) => Some(name.as_str()), None => None }`；name 已是引用。",
-      "answer": "// 062 answer: explicit `ref` binding\nfn first_name(people: &[(String, u32)]) -> Option<&str> {\n    match people.first() {\n        // 显式 ref：name / age 都是引用\n        Some((ref name, ref age)) => {\n            let _ = age;\n            Some(name.as_str())\n        }\n        None => None,\n    }\n}\n\nfn main() {\n    let people = vec![(String::from(\"Ada\"), 36), (String::from(\"Alan\"), 41)];\n    println!(\"{:?}\", first_name(&people));\n    println!(\"{:?}\", first_name(&[]));\n}\n"
+      "answer": "// 062 answer: explicit `ref` binding\nfn first_name(people: &[(String, u32)]) -> Option<&str> {\n    match people.first() {\n        // 显式 ref：name / age 都是引用\n        Some(&(ref name, ref age)) => {\n            let _ = age;\n            Some(name.as_str())\n        }\n        None => None,\n    }\n}\n\nfn main() {\n    let people = vec![(String::from(\"Ada\"), 36), (String::from(\"Alan\"), 41)];\n    println!(\"{:?}\", first_name(&people));\n    println!(\"{:?}\", first_name(&[]));\n}\n"
     },
     "runtime": "desktop"
   },

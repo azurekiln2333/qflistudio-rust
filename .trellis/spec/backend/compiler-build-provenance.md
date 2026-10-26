@@ -70,6 +70,16 @@ Defined global, weak or unique callable symbols may use default or protected
 visibility. Undefined, local, internal and hidden symbols cannot satisfy the ABI.
 All native members require manifest coverage or the explicit Flutter/app/probe
 allowlist. The optional native probe must export its own ABI.
+Every regular member under libs/ must use the selected ABI and a direct .so name.
+The archive inspector requires explicit trusted compiler and adapter record bytes.
+It compares manifest record hashes, the complete compiler boundary identity,
+adapter bytes and packaged compiler libraries. Adapter compiler-library entries
+must also match the compiler record runtime artifact inventory.
+Inspection never resolves producer paths from those records.
+The audit builder captures both initial record hashes in build.json.
+Metadata inspection compares them with the exact consumed record bytes.
+The inspector names these inputs --compiler-record and --adapter-record.
+The builder names them CompilerRecord and AdapterRecord.
 These checks keep `deviceExecuted` false.
 
 ## Verification limits
