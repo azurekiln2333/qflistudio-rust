@@ -179,6 +179,11 @@ cancellation and execution limits. Both ARM64 and x64 OHOS shared libraries
 compile. The Flutter OHOS runner uses this ABI; packaged source execution is
 still unverified and runtime availability remains unchanged.
 
+Current HAP packaging includes only `arm64-v8a` native libraries. The entry
+module's `nativeLib.filter` excludes `x86_64` libraries, including previously
+built files left in `ohos/entry/libs`. Select `--target-platform ohos-arm64`
+explicitly when building the HAP.
+
 ## Native ABI probe
 
 This probe verifies native packaging and a Dart-to-Rust C ABI call. It is not a
@@ -189,21 +194,17 @@ the repository root in PowerShell. For an ARM64 device:
 
 ```powershell
 ./scripts/build_ohos_probe.ps1 -SdkRoot <OHOS-SDK-version-directory> -Rustc <rustc.exe>
-flutter build hap --debug
+flutter build hap --debug --target-platform ohos-arm64
 ```
 
-For an x86_64 simulator, install `x86_64-unknown-linux-ohos` and use:
-
-```powershell
-./scripts/build_ohos_probe.ps1 -SdkRoot <OHOS-SDK-version-directory> -Rustc <rustc.exe> -Architecture x64
-flutter build hap --debug --target-platform ohos-x64
-```
+The current arm64-only HAP requires an ARM64 device or compatible environment;
+it cannot run on an x86_64 simulator.
 
 The SDK directory must contain `native/llvm/bin` and `native/sysroot`. The
 script writes the generated library to `ohos/entry/libs/<ABI>`, which is
 ignored by Git. Build the probe again after cleaning generated platform files.
 
-With a signing profile for `com.azurekiln.qfli.rustcore` and an online matching
+With a signing profile for `com.azurekiln.qfli.rust` and an online matching
 device, install and launch the debug HAP. The expected Flutter device log is:
 
 ```text

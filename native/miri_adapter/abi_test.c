@@ -324,6 +324,7 @@ int main(int argc, char **argv) {
     limit(argv[3], argv[2], "limit_output", 1024, 30000, "output");
     limit(argv[3], argv[2], "cancel", 1048576, 1, "time");
     fixture(argv[3], argv[2], "memory_reuse", "", "reused\n", "", 0, NULL);
+    fixture(argv[3], argv[2], "leak_allowed", "", "retained\n", "", 0, NULL);
     fixture(argv[3], argv[2], "modules_generics", "", "total=12\n", "items=3\n", 0, NULL);
     // rustc/backend process-global state remains live; do not unload the compiler.
     return 0;
