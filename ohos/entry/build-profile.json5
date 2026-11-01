@@ -3,6 +3,11 @@
   "apiType": 'stageMode',
   "buildOption": {
     "nativeLib": {
+      "filter": {
+        "excludes": [
+          "**/x86_64/**"
+        ]
+      },
       "debugSymbol": {
         "strip": true,
         "exclude": [

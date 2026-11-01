@@ -6,7 +6,7 @@
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
     "deviceTypes": [
-      "phone"
+      "phone", "2in1", "tablet"
     ],
     "deliveryWithInstall": true,
     "installationFree": false,
@@ -34,7 +34,8 @@
       }
     ],
     "requestPermissions": [
-      {"name" :  "ohos.permission.INTERNET"},
+      // The offline product has no network flows requiring INTERNET.
+      // Any future loopback feature must enforce its local-only boundary.
       {
         "name": "ohos.permission.READ_PASTEBOARD",
         "reason": "$string:pasteboard_reason",

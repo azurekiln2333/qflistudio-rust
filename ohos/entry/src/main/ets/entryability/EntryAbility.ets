@@ -7,8 +7,8 @@ import {
   MethodResult,
 } from '@ohos/flutter_ohos';
 import { systemShare } from '@kit.ShareKit';
-import { common, Want, ConfigurationConstant } from '@kit.AbilityKit';
-import { window, router } from '@kit.ArkUI';
+import { common, ConfigurationConstant } from '@kit.AbilityKit';
+import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { GeneratedPluginRegistrant } from '../plugins/GeneratedPluginRegistrant';
 import { handlePickerCall, isPickerMethod } from './PickerBridge';
@@ -37,7 +37,7 @@ export default class EntryAbility extends FlutterAbility {
 
     const abilityContext = this.context as common.UIAbilityContext;
 
-    // 通用平台能力：打开系统浏览器（HTML 预览用）。
+    // Rust 独立版只提供本机平台能力；原生入口也执行离线策略。
     const platformChannel = new MethodChannel(
       flutterEngine.dartExecutor.getBinaryMessenger(),
       CHANNEL_PLATFORM,
@@ -52,29 +52,8 @@ export default class EntryAbility extends FlutterAbility {
           } else {
             result.error('INVALID_PROGRESS', 'Startup progress must be a number', null);
           }
-        } else if (call.method === 'openAgreement') {
-          const url = call.argument('url') as string;
-          const title = call.argument('title') as string;
-          if (typeof url !== 'string' || !url.startsWith('https://')) {
-            result.error('INVALID_URL', '协议地址无效', null);
-            return;
-          }
-          router.pushUrl({ url: 'pages/AgreementReader', params: { url, title } })
-            .then(() => result.success(null))
-            .catch((err: BusinessError) => result.error('AGREEMENT_OPEN_FAILED', `${err.code}: ${err.message}`, null));
-        } else if (call.method === 'openUrl') {
-          const url = call.argument('url') as string;
-          const want: Want = {
-            action: 'ohos.want.action.viewData',
-            uri: url,
-          };
-          abilityContext.startAbility(want)
-            .then(() => {
-              result.success(null);
-            })
-            .catch((err: BusinessError) => {
-              result.error(`${err.code}`, `${err.message}`, null);
-            });
+        } else if (call.method === 'openAgreement' || call.method === 'openUrl') {
+          result.error('OFFLINE_ONLY', 'Rust 离线版不支持打开在线协议或外部链接', null);
         } else if (call.method === 'shareText') {
           // 系统分享面板（Share Kit）：纯文本分享。
           const title = call.argument('title') as string;
