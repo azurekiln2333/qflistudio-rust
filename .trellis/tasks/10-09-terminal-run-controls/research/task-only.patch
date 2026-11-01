@@ -1,0 +1,1775 @@
+--- a/lib/rust_runner.dart
++++ b/lib/rust_runner.dart
+@@ -5,8 +5,10 @@
+ import 'package:path/path.dart' as p;
+ import 'package:qfli_studio_core/services/studio_profile.dart';
+ 
++import 'cargo_targets.dart';
+ import 'native_miri_assets.dart';
+ import 'native_miri_runner.dart';
++import 'rust_run_title.dart';
+ 
+ enum RustExecutionMode { automatic, embedded }
+ 
+@@ -37,7 +39,7 @@
+ 
+     final root = p.normalize(p.absolute(projectPath));
+     final entry = p.normalize(p.absolute(entryFile));
+-    final title = '运行 ${p.basename(entry)}（Rust）';
++    final title = rustRunTitle(root, entry);
+     if (executionMode == RustExecutionMode.embedded ||
+         Platform.operatingSystem == 'ohos' ||
+         Platform.isAndroid ||
+@@ -52,6 +54,8 @@
+             backendPath: runtime.backendPath,
+           );
+         }
++        // The embedded runner generates its own concise title; forward its
++        // result transparently so a custom embedded runner is not re-wrapped.
+         return await runner.run(projectPath: projectPath, entryFile: entryFile);
+       } catch (error) {
+         return _failure(title, '无法加载 Rust 运行库：$error');
+@@ -138,17 +142,29 @@
+       final compilerArguments = await _compilerArguments();
+       if (_cancelled) return 130;
+       if (cargo) {
+-        return await _runProcess(
+-          cargoExecutable,
+-          ['run', '--manifest-path', p.join(projectPath, 'Cargo.toml')],
+-          input: await _readInput(),
+-          processEnvironment: {
+-            ...environment,
+-            if (rustcExecutable != 'rustc') 'RUSTC': rustcExecutable,
+-            if (compilerArguments.isNotEmpty)
+-              'CARGO_ENCODED_RUSTFLAGS': compilerArguments.join('\u001f'),
+-          },
+-        );
++        final plan = await _resolveCargoPlan(compilerArguments);
++        // Cancellation during metadata must keep the documented 130 contract.
++        if (_cancelled || plan.cancelled) return 130;
++        if (plan.error != null) {
++          _stderr.add(plan.error!);
++          return kProgramNotRunExitCode;
++        }
++        if (!plan.standalone) {
++          return await _runProcess(
++            cargoExecutable,
++            plan.arguments,
++            input: await _readInput(),
++            processEnvironment: {
++              ...environment,
++              if (rustcExecutable != 'rustc') 'RUSTC': rustcExecutable,
++              if (compilerArguments.isNotEmpty)
++                'CARGO_ENCODED_RUSTFLAGS': compilerArguments.join('\u001f'),
++            },
++          );
++        }
++        // A valid manifest with no runnable target for this source falls
++        // through to the standalone rustc route below. External crate
++        // dependencies are intentionally not synthesized.
+       }
+ 
+       _temporary = await Directory.systemTemp.createTemp('qfli_rust_');
+@@ -191,6 +207,71 @@
+       unawaited(_stderr.close());
+       _done.complete();
+     }
++  }
++
++  /// Resolves how a Cargo project should run [entryFile].
++  ///
++  /// Runs `cargo metadata --no-deps --format-version 1` through the same
++  /// cancelable process wrapper as compilation; metadata stdout never reaches
++  /// the user stream. Returns either explicit `cargo run` arguments or a
++  /// standalone fallback, or an actionable error when the manifest or target
++  /// state is invalid.
++  Future<_CargoRunPlan> _resolveCargoPlan(
++    List<String> compilerArguments,
++  ) async {
++    final metadataOutput = StringBuffer();
++    final metadataEnvironment = {
++      ...environment,
++      if (rustcExecutable != 'rustc') 'RUSTC': rustcExecutable,
++      if (compilerArguments.isNotEmpty)
++        'CARGO_ENCODED_RUSTFLAGS': compilerArguments.join('\u001f'),
++    };
++    final metadataCode = await _runProcess(
++      cargoExecutable,
++      [
++        'metadata',
++        '--no-deps',
++        '--format-version',
++        '1',
++        '--manifest-path',
++        p.join(projectPath, 'Cargo.toml'),
++      ],
++      captureStdout: metadataOutput,
++      processEnvironment: metadataEnvironment,
++    );
++    if (_cancelled) return const _CargoRunPlan.cancelled();
++    if (metadataCode != 0) {
++      return const _CargoRunPlan.error(
++        'cargo metadata 失败，无法确定 Cargo 目标。请检查 Cargo.toml 与工具链。',
++      );
++    }
++    final List<CargoTarget> targets;
++    try {
++      targets = decodeCargoTargets(metadataOutput.toString());
++    } on FormatException catch (error) {
++      return _CargoRunPlan.error('cargo metadata 输出无法解析：${error.message}');
++    }
++    final lookup = selectCargoTarget(targets: targets, entryFile: entryFile);
++    return switch (lookup) {
++      CargoTargetMatch(:final target) => _CargoRunPlan.cargo(
++        cargoRunArguments(target.manifestPath, target),
++      ),
++      CargoTargetUnregistered() => const _CargoRunPlan.standalone(),
++      // A registered but non-runnable source must fail, never fall back to
++      // rustc or to a different Cargo target.
++      CargoTargetNotRunnable(:final targets) => _CargoRunPlan.error(
++        cargoNotRunnableMessage(
++          p.posix.joinAll(p.split(p.relative(entryFile, from: projectPath))),
++          targets,
++        ),
++      ),
++      CargoTargetAmbiguous(:final targets) => _CargoRunPlan.error(
++        cargoAmbiguousMessage(
++          p.posix.joinAll(p.split(p.relative(entryFile, from: projectPath))),
++          targets,
++        ),
++      ),
++    };
+   }
+ 
+   Future<List<String>> _compilerArguments() async {
+@@ -433,3 +514,34 @@
+     process.kill(ProcessSignal.sigkill);
+   }
+ }
++
++/// How a Cargo project run was resolved before spawning the build.
++class _CargoRunPlan {
++  const _CargoRunPlan._({
++    this.arguments = const [],
++    this.standalone = false,
++    this.cancelled = false,
++    this.error,
++  });
++
++  const _CargoRunPlan.cargo(List<String> arguments)
++    : this._(arguments: arguments);
++
++  const _CargoRunPlan.standalone() : this._(standalone: true);
++
++  const _CargoRunPlan.cancelled() : this._(cancelled: true);
++
++  const _CargoRunPlan.error(String message) : this._(error: message);
++
++  /// Explicit `cargo run` arguments when a runnable target matched.
++  final List<String> arguments;
++
++  /// True when the manifest is valid but the source is not a runnable target.
++  final bool standalone;
++
++  /// True when cancellation interrupted metadata resolution.
++  final bool cancelled;
++
++  /// Actionable diagnostic; when set, no build must start.
++  final String? error;
++}
+--- a/lib/native_miri_runner.dart
++++ b/lib/native_miri_runner.dart
+@@ -7,6 +7,8 @@
+ import 'package:ffi/ffi.dart';
+ import 'package:path/path.dart' as p;
+ import 'package:qfli_studio_core/services/studio_profile.dart';
++
++import 'rust_run_title.dart';
+ 
+ /// Invokes the packaged upstream rustc/Miri engine through its session ABI.
+ class NativeMiriProgramRunner implements ProgramRunner {
+@@ -38,7 +40,7 @@
+     required String entryFile,
+   }) async {
+     if (p.extension(entryFile).toLowerCase() != '.rs') return null;
+-    final title = '运行 ${p.basename(entryFile)}（Rust / Miri）';
++    final title = rustRunTitle(projectPath, entryFile);
+     final root = p.normalize(p.absolute(projectPath));
+     final entry = p.normalize(p.absolute(entryFile));
+     try {
+--- a/test/rust_app_test.dart
++++ b/test/rust_app_test.dart
+@@ -3,6 +3,7 @@
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:path/path.dart' as p;
+ import 'package:qfli_rust/main.dart' show rustProfile;
++import 'package:qfli_rust/native_miri_runner.dart';
+ import 'package:qfli_rust/rust_runner.dart';
+ import 'package:qfli_studio_core/services/project_templates.dart';
+ import 'package:qfli_studio_core/services/runner_service.dart';
+@@ -67,6 +68,17 @@
+     final errors = result.stderr.toList();
+     final code = await result.exitCode;
+     return (code, await output, await errors);
++  }
++
++  Future<void> expectStartupFailure(
++    ProgramRunResult result,
++    String diagnostic,
++  ) async {
++    final output = result.stdout.toList();
++    final errors = result.stderr.toList();
++    expect(await result.exitCode, kProgramNotRunExitCode);
++    expect(await output, isEmpty);
++    expect((await errors).join('\n'), contains(diagnostic));
+   }
+ 
+   group('档位收窄', () {
+@@ -174,6 +186,77 @@
+       );
+       expect(secondCode, 17, reason: secondErrors.join('\n'));
+       expect(secondOutput, ['cargo-ready']);
++    }, skip: !toolAvailable('cargo'));
++
++    test('Cargo 项目按选中的备用入口运行，而不是默认 main', () async {
++      write('Cargo.toml', '''
++[package]
++name = "qfli_multi"
++version = "0.1.0"
++edition = "2021"
++
++[[bin]]
++name = "primary"
++path = "src/main.rs"
++
++[[bin]]
++name = "secondary"
++path = "src/alt.rs"
++''');
++      write('src/main.rs', 'fn main() { println!("primary-target"); }');
++      write('src/alt.rs', 'fn main() { println!("secondary-target"); }');
++      final (code, output, errors) = await runRust('src/alt.rs');
++      expect(code, 0, reason: errors.join('\n'));
++      expect(output, ['secondary-target']);
++    }, skip: !toolAvailable('cargo'));
++
++    test('Cargo 项目按自定义 target 名与路径运行 example', () async {
++      write('Cargo.toml', '''
++[package]
++name = "qfli_example"
++version = "0.1.0"
++edition = "2021"
++
++[[example]]
++name = "named_demo"
++path = "examples/named_demo.rs"
++''');
++      write('src/main.rs', 'fn main() {}');
++      write(
++        'examples/named_demo.rs',
++        'fn main() { println!("example-target"); }',
++      );
++      final (code, output, errors) = await runRust('examples/named_demo.rs');
++      expect(code, 0, reason: errors.join('\n'));
++      expect(output, ['example-target']);
++    }, skip: !toolAvailable('cargo'));
++
++    test(
++      'Cargo 项目中未注册的普通 .rs 走单文件 rustc 路线',
++      () async {
++        write('Cargo.toml', '''
++[package]
++name = "qfli_unregistered"
++version = "0.1.0"
++edition = "2021"
++''');
++        write('src/main.rs', 'fn main() { println!("default-main"); }');
++        write('main2.rs', 'fn main() { println!("standalone-main2"); }');
++        final (code, output, errors) = await runRust('main2.rs');
++        expect(code, 0, reason: errors.join('\n'));
++        expect(output, ['standalone-main2']);
++        expect(errors.join('\n'), isNot(contains('default-main')));
++      },
++      skip: !toolAvailable('cargo') || !toolAvailable('rustc'),
++    );
++
++    test('Cargo metadata 不可用时明确失败，不回跑默认 main', () async {
++      write('Cargo.toml', 'this is not valid toml =');
++      write('src/main.rs', 'fn main() { println!("should-not-run"); }');
++      final (code, output, errors) = await runRust('src/main.rs');
++      expect(code, kProgramNotRunExitCode);
++      expect(output, isEmpty);
++      expect(errors.join('\n'), contains('cargo metadata'));
+     }, skip: !toolAvailable('cargo'));
+ 
+     test('编译失败显示 rustc 诊断，不运行旧程序', () async {
+@@ -341,6 +424,62 @@
+     });
+   });
+ 
++  group('运行标题', () {
++    test('桌面路线标题是简洁的 run <项目相对路径>', () async {
++      write('src/main.rs', 'fn main() {}');
++      final result =
++          await const RustProgramRunner(
++            rustcExecutable: 'qfli_missing_rustc_for_title',
++          ).run(
++            projectPath: project.path,
++            entryFile: p.join(project.path, 'src/main.rs'),
++          );
++      expect(result, isNotNull);
++      expect(result!.title, 'run src/main.rs');
++      expect(result.title, isNot(contains('运行')));
++      expect(result.title, isNot(contains('Rust')));
++      await expectStartupFailure(result, 'qfli_missing_rustc_for_title');
++    });
++
++    test('嵌入式路线标题同为 run <项目相对路径>，无 Miri 后缀', () async {
++      final sysroot = (Directory(
++        p.join(project.path, 'sysroot'),
++      )..createSync()).path;
++      write('main2.rs', 'fn main() {}');
++      final result =
++          await RustProgramRunner(
++            executionMode: RustExecutionMode.embedded,
++            embeddedRunner: NativeMiriProgramRunner(
++              sysrootPath: sysroot,
++              libraryPath: p.join(project.path, 'missing_native_library'),
++            ),
++          ).run(
++            projectPath: project.path,
++            entryFile: p.join(project.path, 'main2.rs'),
++          );
++      expect(result, isNotNull);
++      // The failure title still goes through the shared concise contract.
++      expect(result!.title, 'run main2.rs');
++      expect(result.title, isNot(contains('Miri')));
++      await expectStartupFailure(result, 'missing_native_library');
++    });
++
++    test('含空格的项目相对路径在标题中被引号包裹', () async {
++      write('src/my file.rs', 'fn main() {}');
++      final result =
++          await const RustProgramRunner(
++            rustcExecutable: 'qfli_missing_rustc_for_title',
++          ).run(
++            projectPath: project.path,
++            entryFile: p.join(project.path, 'src/my file.rs'),
++          );
++      expect(result, isNotNull);
++      expect(result!.title, 'run "src/my file.rs"');
++      expect(result.title, isNot(contains('运行')));
++      await expectStartupFailure(result, 'qfli_missing_rustc_for_title');
++    });
++  });
++
+   group('运行按钮分流', () {
+     test('点运行走 Rust 后端并执行源码', () async {
+       write('main.rs', 'fn main() { println!("through runner"); }');
+@@ -350,7 +489,7 @@
+       );
+       expect(result, isNotNull);
+       expect(result!.hint, isNull, reason: '后端接管了就不该走兜底提示');
+-      expect(result.title, contains('Rust'));
++      expect(result.title, 'run main.rs');
+       expect(await result.stdout!.toList(), ['through runner']);
+       expect(await result.stderr!.toList(), isEmpty);
+       expect(await result.exitCode, 0);
+--- /dev/null
++++ b/lib/cargo_targets.dart
+@@ -0,0 +1,237 @@
++import 'dart:convert';
++
++import 'package:path/path.dart' as p;
++
++/// One Cargo target decoded from `cargo metadata`.
++///
++/// The manifest/package/target identity comes from Cargo itself; callers must
++/// not invent a target name from a file name. Targets that own an entry source
++/// but cannot be executed by `cargo run` (library, test, bench, build script,
++/// or a library-shaped example) are retained so selection can reject them
++/// explicitly instead of pretending the source is unregistered.
++class CargoTarget {
++  const CargoTarget({
++    required this.manifestPath,
++    required this.packageName,
++    required this.targetName,
++    required this.srcPath,
++    required this.kinds,
++    required this.crateTypes,
++    required this.isRunnable,
++    required this.isExample,
++  });
++
++  final String manifestPath;
++  final String packageName;
++  final String targetName;
++  final String srcPath;
++
++  /// The raw `kind` list (`bin`, `lib`, `example`, `test`, ...).
++  final List<String> kinds;
++
++  /// The raw `crate_types` list (`bin`, `lib`, `proc-macro`, ...).
++  final List<String> crateTypes;
++
++  /// `true` when `cargo run` can execute this target: a binary, or an example
++  /// that actually builds a binary crate.
++  final bool isRunnable;
++
++  /// `true` when the run selector must be `--example` rather than `--bin`.
++  final bool isExample;
++
++  /// The explicit selector flag for a runnable target.
++  String get kindFlag => isExample ? '--example' : '--bin';
++
++  /// Short identity used in diagnostics.
++  String get label =>
++      '${isExample
++          ? 'example'
++          : kinds.isEmpty
++          ? 'target'
++          : kinds.first} '
++      '$targetName ($packageName)';
++}
++
++/// Outcome of matching an entry source against Cargo's target list.
++sealed class CargoTargetLookup {
++  const CargoTargetLookup();
++}
++
++/// Exactly one runnable target owns the requested source.
++class CargoTargetMatch extends CargoTargetLookup {
++  const CargoTargetMatch(this.target);
++
++  final CargoTarget target;
++}
++
++/// Cargo metadata is valid and no target at all owns the source.
++///
++/// The caller falls back to the standalone rustc route; the source must be
++/// independently compilable and does not inherit external Cargo dependencies.
++class CargoTargetUnregistered extends CargoTargetLookup {
++  const CargoTargetUnregistered();
++}
++
++/// Cargo metadata is valid but the source belongs to a non-runnable target
++/// (library, test, bench, build script, library-shaped example).
++///
++/// The caller must fail with diagnostics; it must not fall back to rustc and
++/// must never run a different source.
++class CargoTargetNotRunnable extends CargoTargetLookup {
++  const CargoTargetNotRunnable(this.targets);
++
++  final List<CargoTarget> targets;
++}
++
++/// Cargo metadata is valid but several runnable targets share the source.
++class CargoTargetAmbiguous extends CargoTargetLookup {
++  const CargoTargetAmbiguous(this.targets);
++
++  final List<CargoTarget> targets;
++}
++
++/// Decodes `cargo metadata --no-deps --format-version 1` output.
++///
++/// Throws [FormatException] for malformed JSON or an unexpected schema shape.
++/// The caller turns that into an actionable diagnostic; malformed metadata
++/// must never be treated as "source is unregistered" and must never run a
++/// different file.
++List<CargoTarget> decodeCargoTargets(String metadataJson) {
++  final Object? root;
++  try {
++    root = jsonDecode(metadataJson);
++  } on FormatException {
++    throw const FormatException('cargo metadata did not return valid JSON');
++  }
++  if (root is! Map<String, Object?>) {
++    throw const FormatException('cargo metadata did not return a JSON object');
++  }
++  final packages = root['packages'];
++  if (packages is! List) {
++    throw const FormatException('cargo metadata omitted the package list');
++  }
++  final targets = <CargoTarget>[];
++  for (final package in packages) {
++    if (package is! Map<String, Object?>) {
++      throw const FormatException(
++        'cargo metadata returned a non-object package',
++      );
++    }
++    final packageName = package['name'];
++    final manifestPath = package['manifest_path'];
++    if (packageName is! String || manifestPath is! String) {
++      throw const FormatException(
++        'cargo metadata returned a package without a name or manifest path',
++      );
++    }
++    final packageTargets = package['targets'];
++    if (packageTargets is! List) {
++      throw const FormatException(
++        'cargo metadata returned a package without a target list',
++      );
++    }
++    for (final target in packageTargets) {
++      if (target is! Map<String, Object?>) {
++        throw const FormatException(
++          'cargo metadata returned a non-object target',
++        );
++      }
++      final name = target['name'];
++      final srcPath = target['src_path'];
++      if (name is! String || srcPath is! String) {
++        throw const FormatException(
++          'cargo metadata returned a target without a name or source path',
++        );
++      }
++      final kinds = _stringList(target['kind'], 'target kind');
++      final crateTypes = _stringList(target['crate_types'], 'crate types');
++      final isBinKinds = kinds.contains('bin');
++      final isExampleKinds = kinds.contains('example');
++      // A library-shaped example has no binary crate to execute; only
++      // examples whose crate_types include `bin` can be run.
++      final exampleRunnable = isExampleKinds && crateTypes.contains('bin');
++      final runnable = isBinKinds || exampleRunnable;
++      targets.add(
++        CargoTarget(
++          manifestPath: manifestPath,
++          packageName: packageName,
++          targetName: name,
++          srcPath: srcPath,
++          kinds: kinds,
++          crateTypes: crateTypes,
++          // `example` wins for a target advertising both, because the example
++          // selector is the more specific request.
++          isExample: isExampleKinds,
++          isRunnable: runnable,
++        ),
++      );
++    }
++  }
++  return targets;
++}
++
++List<String> _stringList(Object? value, String label) {
++  if (value is! List) {
++    throw FormatException('cargo metadata returned $label that is not a list');
++  }
++  return value
++      .map((entry) {
++        if (entry is! String) {
++          throw FormatException(
++            'cargo metadata returned a non-string $label entry',
++          );
++        }
++        return entry;
++      })
++      .toList(growable: false);
++}
++
++/// Selects the target that owns [entryFile] and reports its runnability.
++CargoTargetLookup selectCargoTarget({
++  required List<CargoTarget> targets,
++  required String entryFile,
++}) {
++  final entry = p.normalize(p.absolute(entryFile));
++  final owners = targets
++      .where(
++        (target) => p.equals(p.normalize(p.absolute(target.srcPath)), entry),
++      )
++      .toList(growable: false);
++  if (owners.isEmpty) return const CargoTargetUnregistered();
++  final runnable = owners.where((target) => target.isRunnable).toList();
++  if (runnable.isEmpty) return CargoTargetNotRunnable(owners);
++  if (runnable.length > 1) return CargoTargetAmbiguous(runnable);
++  return CargoTargetMatch(runnable.single);
++}
++
++/// Actionable message for a source that Cargo knows but cannot run.
++String cargoNotRunnableMessage(
++  String relativeSource,
++  List<CargoTarget> targets,
++) {
++  final owners = targets.map((target) => target.label).join(', ');
++  return 'Cargo 项目中 $relativeSource 属于不可运行的目标（$owners）。'
++      '只有 bin 或二进制 example 可以运行，未回退到其他入口。';
++}
++
++/// Actionable message for several runnable targets sharing one source.
++String cargoAmbiguousMessage(String relativeSource, List<CargoTarget> targets) {
++  final owners = targets.map((target) => target.label).join(', ');
++  return 'Cargo 项目中 $relativeSource 对应多个可运行目标（$owners）。'
++      '请在 Cargo.toml 中声明唯一的显式目标后重试。';
++}
++
++/// Builds the `cargo run` argument list for [target].
++///
++/// The manifest path binds the run to the package that owns the source, and the
++/// package name disambiguates workspaces that reuse a target name.
++List<String> cargoRunArguments(String manifestPath, CargoTarget target) =>
++    <String>[
++      'run',
++      '--manifest-path',
++      manifestPath,
++      '--package',
++      target.packageName,
++      target.kindFlag,
++      target.targetName,
++    ];
+--- /dev/null
++++ b/lib/rust_run_title.dart
+@@ -0,0 +1,27 @@
++import 'package:path/path.dart' as p;
++
++/// Concise terminal title shared by every Rust execution route.
++///
++/// `run <project-relative source>` with a portable separator and no localized
++/// boilerplate or backend suffix (`(Rust)`, `(Rust / Miri)`, `(jdk)`, ...).
++/// A path containing whitespace is quoted so the command line stays readable
++/// and copy-pasteable: `run "src/my file.rs"`. Falls back to the entry file
++/// name when the source is outside the project root; callers reject such
++/// sources separately.
++String rustRunTitle(String projectRoot, String entryFile) {
++  final root = p.normalize(p.absolute(projectRoot));
++  final entry = p.normalize(p.absolute(entryFile));
++  final relative = p.isWithin(root, entry)
++      ? p.relative(entry, from: root)
++      : p.basename(entry);
++  final display = p.posix.joinAll(p.split(relative));
++  return 'run ${_quoteIfNeeded(display)}';
++}
++
++/// Wraps [value] in double quotes when it contains whitespace, escaping any
++/// embedded double quote. Non-whitespace paths are returned unchanged.
++String _quoteIfNeeded(String value) {
++  if (!value.contains(RegExp(r'\s'))) return value;
++  final escaped = value.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
++  return '"$escaped"';
++}
+--- /dev/null
++++ b/test/cargo_targets_test.dart
+@@ -0,0 +1,430 @@
++import 'dart:convert';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:path/path.dart' as p;
++import 'package:qfli_rust/cargo_targets.dart';
++
++/// Focused decoding/selection tests for the Cargo metadata seam.
++///
++/// These run without a Rust toolchain, so they are the real regression for
++/// selected-source routing: multiple binaries, custom target names/paths,
++/// unregistered sources, non-runnable targets, ambiguity and malformed
++/// metadata. The reported contract is "which Cargo identity runs", which is
++/// exactly the behavior the old `cargo run` implementation got wrong.
++void main() {
++  const projectRoot = '/work/project';
++  String absolute(String relative) => p.join(projectRoot, relative);
++
++  Map<String, Object?> package({
++    required String name,
++    required List<Map<String, Object?>> targets,
++    String? manifestPath,
++  }) => {
++    'name': name,
++    'manifest_path': manifestPath ?? p.join(projectRoot, 'Cargo.toml'),
++    'targets': targets,
++  };
++
++  Map<String, Object?> target({
++    required String name,
++    required String srcPath,
++    required List<String> kind,
++    List<String> crateTypes = const ['bin'],
++  }) => {
++    'name': name,
++    'src_path': srcPath,
++    'kind': kind,
++    'crate_types': crateTypes,
++  };
++
++  String metadata(List<Map<String, Object?>> packages) =>
++      jsonEncode({'packages': packages, 'target_directory': '/work/target'});
++
++  group('decodeCargoTargets', () {
++    test('keeps every target and marks only runnable kinds runnable', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'app',
++            targets: [
++              target(
++                name: 'app',
++                srcPath: absolute('src/main.rs'),
++                kind: ['bin'],
++              ),
++              target(
++                name: 'demo',
++                srcPath: absolute('examples/demo.rs'),
++                kind: ['example'],
++              ),
++              target(
++                name: 'app',
++                srcPath: absolute('src/lib.rs'),
++                kind: ['lib'],
++                crateTypes: ['lib'],
++              ),
++              target(
++                name: 'it',
++                srcPath: absolute('tests/it.rs'),
++                kind: ['test'],
++              ),
++              target(
++                name: 'bench',
++                srcPath: absolute('benches/bench.rs'),
++                kind: ['bench'],
++              ),
++              target(
++                name: 'build',
++                srcPath: absolute('build.rs'),
++                kind: ['custom-build'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      expect(targets.map((t) => t.targetName), [
++        'app',
++        'demo',
++        'app',
++        'it',
++        'bench',
++        'build',
++      ]);
++      expect(targets.where((t) => t.isRunnable).map((t) => t.targetName), [
++        'app',
++        'demo',
++      ]);
++    });
++
++    test('a library-shaped example is not runnable', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'app',
++            targets: [
++              target(
++                name: 'helper',
++                srcPath: absolute('examples/helper.rs'),
++                kind: ['example'],
++                crateTypes: ['lib'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      expect(targets.single.isRunnable, isFalse);
++    });
++
++    test('rejects metadata that is not a JSON object', () {
++      expect(
++        () => decodeCargoTargets('not-json'),
++        throwsA(isA<FormatException>()),
++      );
++      expect(() => decodeCargoTargets('[]'), throwsA(isA<FormatException>()));
++      expect(
++        () => decodeCargoTargets('{"packages": "no"}'),
++        throwsA(isA<FormatException>()),
++      );
++    });
++
++    test('rejects a package without a manifest path', () {
++      expect(
++        () => decodeCargoTargets(
++          jsonEncode({
++            'packages': [
++              {
++                'name': 'app',
++                'targets': [
++                  target(
++                    name: 'app',
++                    srcPath: absolute('main.rs'),
++                    kind: ['bin'],
++                  ),
++                ],
++              },
++            ],
++          }),
++        ),
++        throwsA(isA<FormatException>()),
++      );
++    });
++
++    test('a non-list target kind is a FormatException, not a TypeError', () {
++      expect(
++        () => decodeCargoTargets(
++          jsonEncode({
++            'packages': [
++              {
++                'name': 'app',
++                'manifest_path': p.join(projectRoot, 'Cargo.toml'),
++                'targets': [
++                  {
++                    'name': 'app',
++                    'src_path': absolute('src/main.rs'),
++                    'kind': 'bin',
++                    'crate_types': ['bin'],
++                  },
++                ],
++              },
++            ],
++          }),
++        ),
++        throwsA(isA<FormatException>()),
++      );
++    });
++
++    test('a non-object package is a FormatException', () {
++      expect(
++        () => decodeCargoTargets(
++          jsonEncode({
++            'packages': ['not-a-package'],
++          }),
++        ),
++        throwsA(isA<FormatException>()),
++      );
++    });
++  });
++
++  group('selectCargoTarget', () {
++    test('matches an alternate binary by its custom name and path', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'app',
++            targets: [
++              target(
++                name: 'app',
++                srcPath: absolute('src/main.rs'),
++                kind: ['bin'],
++              ),
++              target(
++                name: 'tool',
++                srcPath: absolute('src/tool.rs'),
++                kind: ['bin'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      final lookup = selectCargoTarget(
++        targets: targets,
++        entryFile: absolute('src/tool.rs'),
++      );
++      expect(lookup, isA<CargoTargetMatch>());
++      final match = lookup as CargoTargetMatch;
++      expect(match.target.targetName, 'tool');
++      expect(match.target.packageName, 'app');
++      expect(match.target.kindFlag, '--bin');
++      expect(cargoRunArguments(match.target.manifestPath, match.target), [
++        'run',
++        '--manifest-path',
++        p.join(projectRoot, 'Cargo.toml'),
++        '--package',
++        'app',
++        '--bin',
++        'tool',
++      ]);
++    });
++
++    test('matches an example with the example selector', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'app',
++            targets: [
++              target(
++                name: 'demo',
++                srcPath: absolute('examples/demo.rs'),
++                kind: ['example'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      final match =
++          selectCargoTarget(
++                targets: targets,
++                entryFile: absolute('examples/demo.rs'),
++              )
++              as CargoTargetMatch;
++      expect(match.target.kindFlag, '--example');
++      expect(cargoRunArguments(match.target.manifestPath, match.target), [
++        'run',
++        '--manifest-path',
++        p.join(projectRoot, 'Cargo.toml'),
++        '--package',
++        'app',
++        '--example',
++        'demo',
++      ]);
++    });
++
++    test('uses the package that owns the source in a workspace', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'first',
++            manifestPath: p.join(projectRoot, 'first/Cargo.toml'),
++            targets: [
++              target(
++                name: 'first',
++                srcPath: absolute('first/src/main.rs'),
++                kind: ['bin'],
++              ),
++            ],
++          ),
++          package(
++            name: 'second',
++            manifestPath: p.join(projectRoot, 'second/Cargo.toml'),
++            targets: [
++              target(
++                name: 'second',
++                srcPath: absolute('second/src/main.rs'),
++                kind: ['bin'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      final match =
++          selectCargoTarget(
++                targets: targets,
++                entryFile: absolute('second/src/main.rs'),
++              )
++              as CargoTargetMatch;
++      expect(match.target.packageName, 'second');
++      expect(
++        cargoRunArguments(match.target.manifestPath, match.target),
++        contains(p.join(projectRoot, 'second/Cargo.toml')),
++      );
++    });
++
++    test('a source no Cargo target owns is unregistered', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'app',
++            targets: [
++              target(
++                name: 'app',
++                srcPath: absolute('src/main.rs'),
++                kind: ['bin'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      expect(
++        selectCargoTarget(targets: targets, entryFile: absolute('main2.rs')),
++        isA<CargoTargetUnregistered>(),
++      );
++    });
++
++    test('a source owned by two runnable targets is ambiguous', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'app',
++            targets: [
++              target(
++                name: 'one',
++                srcPath: absolute('src/main.rs'),
++                kind: ['bin'],
++              ),
++              target(
++                name: 'two',
++                srcPath: absolute('src/main.rs'),
++                kind: ['bin'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      expect(
++        selectCargoTarget(targets: targets, entryFile: absolute('src/main.rs')),
++        isA<CargoTargetAmbiguous>(),
++      );
++    });
++
++    test('a library source is registered but not runnable', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'app',
++            targets: [
++              target(
++                name: 'app',
++                srcPath: absolute('src/main.rs'),
++                kind: ['bin'],
++              ),
++              target(
++                name: 'app',
++                srcPath: absolute('src/lib.rs'),
++                kind: ['lib'],
++                crateTypes: ['lib'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      final lookup = selectCargoTarget(
++        targets: targets,
++        entryFile: absolute('src/lib.rs'),
++      );
++      // lib.rs is Cargo-known but cannot be run; it must be rejected rather
++      // than silently replaced with src/main.rs through the rustc fallback.
++      expect(lookup, isA<CargoTargetNotRunnable>());
++      expect(
++        (lookup as CargoTargetNotRunnable).targets.single.targetName,
++        'app',
++      );
++    });
++
++    test('a library-shaped example source is registered but not runnable', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'app',
++            targets: [
++              target(
++                name: 'helper',
++                srcPath: absolute('examples/helper.rs'),
++                kind: ['example'],
++                crateTypes: ['lib'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      expect(
++        selectCargoTarget(
++          targets: targets,
++          entryFile: absolute('examples/helper.rs'),
++        ),
++        isA<CargoTargetNotRunnable>(),
++      );
++    });
++
++    test('matching is path-canonical, not string-equal', () {
++      final targets = decodeCargoTargets(
++        metadata([
++          package(
++            name: 'app',
++            targets: [
++              target(
++                name: 'tool',
++                srcPath: p.join(projectRoot, 'src', 'tool.rs'),
++                kind: ['bin'],
++              ),
++            ],
++          ),
++        ]),
++      );
++      final lookup = selectCargoTarget(
++        targets: targets,
++        entryFile: p.join(projectRoot, 'src', '..', 'src', 'tool.rs'),
++      );
++      expect(lookup, isA<CargoTargetMatch>());
++    });
++  });
++}
+--- /dev/null
++++ b/test/cargo_process_wiring_test.dart
+@@ -0,0 +1,400 @@
++import 'dart:async';
++import 'dart:convert';
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:path/path.dart' as p;
++import 'package:qfli_rust/rust_runner.dart';
++import 'package:qfli_studio_core/services/studio_profile.dart';
++
++/// Process-wiring tests for the Cargo route.
++///
++/// A small Dart program is compiled into a throwaway executable that imitates
++/// `cargo` (and `rustc`) enough to prove the real `_RustRunSession` wiring:
++/// metadata stdout stays private, the exact `--bin`/`--example` selector is
++/// used, a metadata failure never starts a build, and cancellation during
++/// metadata returns 130. It is injected through the existing
++/// `cargoExecutable`/`rustcExecutable`/`environment` parameters, so no
++/// test-only production seam is added.
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  late Directory scratch;
++  late String fakeCargo;
++  late String fakeRustc;
++  late String fakeProgram;
++  late Directory project;
++
++  const fakeToolchainSource = r'''
++import 'dart:convert';
++import 'dart:io';
++
++Future<void> main(List<String> args) async {
++  final mode = Platform.environment['QFLI_FAKE_MODE'] ?? 'ok';
++  if (args.isNotEmpty && args.first == 'metadata') {
++    if (mode == 'metadata-fail') {
++      stderr.writeln('error: could not read manifest');
++      await stderr.flush();
++      exit(101);
++    }
++    if (mode == 'metadata-hang') {
++      // Announce readiness on stderr *before* blocking, flushed, so the test
++      // cancels only once this metadata process is genuinely live.
++      stderr.writeln('FAKE_METADATA_READY');
++      await stderr.flush();
++      stdout.write('{"packages":');
++      await stdout.flush();
++      await Future<void>.delayed(const Duration(seconds: 30));
++      stdout.write('[]}');
++      await stdout.flush();
++      exit(0);
++    }
++    stdout.writeln(Platform.environment['QFLI_FAKE_METADATA'] ?? '{}');
++    await stdout.flush();
++    exit(0);
++  }
++  if (args.isNotEmpty && args.first == 'run') {
++    // Echo the exact selector on stderr so run selection is observable.
++    stderr.writeln('CARGO_RUN ${args.join(' ')}');
++    stdout.writeln('program-output');
++    await stdout.flush();
++    exit(0);
++  }
++  stderr.writeln('unexpected fake cargo args: $args');
++  exit(2);
++}
++''';
++
++  const fakeRustcSource = r'''
++import 'dart:io';
++
++Future<void> main(List<String> args) async {
++  // `rustc <src> ... -o <output>`: copy a real prebuilt stand-in program.
++  if (args.contains('-vV')) {
++    stdout.writeln('host: x86_64-unknown-linux-gnu');
++    exit(0);
++  }
++  if (args.contains('--print') && args.contains('sysroot')) {
++    stdout.writeln('/fake/sysroot');
++    exit(0);
++  }
++  final outputIndex = args.indexOf('-o');
++  if (outputIndex < 0 || outputIndex + 1 >= args.length) exit(2);
++  final output = args[outputIndex + 1];
++  final program = Platform.environment['QFLI_FAKE_PROGRAM'];
++  if (program == null || !File(program).existsSync()) {
++    stderr.writeln('fake rustc: missing QFLI_FAKE_PROGRAM');
++    exit(3);
++  }
++  // The copy is a genuine executable on every platform, so the standalone
++  // rustc route runs it for real instead of failing to spawn a text script.
++  File(program).copySync(output);
++  exit(0);
++}
++''';
++
++  const fakeProgramSource = r'''
++import 'dart:io';
++
++Future<void> main(List<String> args) async {
++  // Stand-in for a program produced by the standalone rustc route.
++  stdout.writeln('standalone-output');
++  await stdout.flush();
++  exit(0);
++}
++''';
++
++  Future<String> compile(String source, String name) async {
++    final sourceFile = File(p.join(scratch.path, '$name.dart'));
++    sourceFile.writeAsStringSync(source);
++    final output = p.join(
++      scratch.path,
++      Platform.isWindows ? '$name.exe' : name,
++    );
++    final result = await Process.run(_dartExecutable(), [
++      'compile',
++      'exe',
++      sourceFile.path,
++      '-o',
++      output,
++    ]);
++    expect(
++      result.exitCode,
++      0,
++      reason: 'Failed to compile $name: ${result.stdout}\n${result.stderr}',
++    );
++    return output;
++  }
++
++  setUpAll(() async {
++    scratch = Directory.systemTemp.createTempSync('qfli_fake_toolchain_');
++    fakeCargo = await compile(fakeToolchainSource, 'fake_cargo');
++    fakeRustc = await compile(fakeRustcSource, 'fake_rustc');
++    fakeProgram = await compile(fakeProgramSource, 'fake_program');
++  });
++
++  tearDownAll(() {
++    if (scratch.existsSync()) scratch.deleteSync(recursive: true);
++  });
++
++  setUp(() {
++    project = Directory.systemTemp.createTempSync('qfli_cargo_wiring_');
++    File(p.join(project.path, 'Cargo.toml')).writeAsStringSync('''
++[package]
++name = "fake_pkg"
++version = "0.1.0"
++edition = "2021"
++
++[[bin]]
++name = "primary"
++path = "src/main.rs"
++
++[[bin]]
++name = "secondary"
++path = "src/alt.rs"
++''');
++    Directory(p.join(project.path, 'src')).createSync(recursive: true);
++    File(
++      p.join(project.path, 'src', 'main.rs'),
++    ).writeAsStringSync('fn main() {}');
++    File(
++      p.join(project.path, 'src', 'alt.rs'),
++    ).writeAsStringSync('fn main() {}');
++  });
++
++  tearDown(() {
++    if (project.existsSync()) project.deleteSync(recursive: true);
++  });
++
++  String metadataFor(List<(String, String)> binaries) {
++    final targets = binaries
++        .map(
++          (binary) => {
++            'name': binary.$1,
++            'src_path': p.join(project.path, binary.$2),
++            'kind': ['bin'],
++            'crate_types': ['bin'],
++          },
++        )
++        .toList();
++    return jsonEncode({
++      'packages': [
++        {
++          'name': 'fake_pkg',
++          'manifest_path': p.join(project.path, 'Cargo.toml'),
++          'targets': targets,
++        },
++      ],
++    });
++  }
++
++  RustProgramRunner runner({Map<String, String>? environment}) =>
++      RustProgramRunner(
++        cargoExecutable: fakeCargo,
++        rustcExecutable: fakeRustc,
++        // The standalone rustc fake copies this prebuilt program so the
++        // generated artifact is a genuine executable on every platform.
++        environment: {'QFLI_FAKE_PROGRAM': fakeProgram, ...?environment},
++      );
++
++  Future<(int, List<String>, List<String>)> run(
++    String entry, {
++    Map<String, String>? environment,
++  }) async {
++    final result = await runner(
++      environment: environment,
++    ).run(projectPath: project.path, entryFile: p.join(project.path, entry));
++    expect(result, isNotNull);
++    final output = result!.stdout.toList();
++    final errors = result.stderr.toList();
++    final code = await result.exitCode;
++    return (code, await output, await errors);
++  }
++
++  test(
++    'selects the matching alternate bin and keeps metadata stdout private',
++    () async {
++      final (code, output, errors) = await run(
++        'src/alt.rs',
++        environment: {
++          'QFLI_FAKE_METADATA': metadataFor([
++            ('primary', 'src/main.rs'),
++            ('secondary', 'src/alt.rs'),
++          ]),
++        },
++      );
++      expect(code, 0, reason: errors.join('\n'));
++      expect(output, ['program-output']);
++      final cargoLine = errors.singleWhere(
++        (line) => line.startsWith('CARGO_RUN'),
++      );
++      expect(cargoLine, contains('--bin secondary'));
++      expect(cargoLine, isNot(contains('--bin primary')));
++      // The metadata JSON must never leak onto the user streams.
++      expect(errors.join('\n'), isNot(contains('packages')));
++      expect(output.join('\n'), isNot(contains('packages')));
++    },
++  );
++
++  test('selects an example with --example', () async {
++    Directory(p.join(project.path, 'examples')).createSync(recursive: true);
++    File(
++      p.join(project.path, 'examples', 'demo.rs'),
++    ).writeAsStringSync('fn main() {}');
++    final metadata = jsonEncode({
++      'packages': [
++        {
++          'name': 'fake_pkg',
++          'manifest_path': p.join(project.path, 'Cargo.toml'),
++          'targets': [
++            {
++              'name': 'demo',
++              'src_path': p.join(project.path, 'examples', 'demo.rs'),
++              'kind': ['example'],
++              'crate_types': ['bin'],
++            },
++          ],
++        },
++      ],
++    });
++    final (code, _, errors) = await run(
++      'examples/demo.rs',
++      environment: {'QFLI_FAKE_METADATA': metadata},
++    );
++    expect(code, 0, reason: errors.join('\n'));
++    final cargoLine = errors.singleWhere(
++      (line) => line.startsWith('CARGO_RUN'),
++    );
++    expect(cargoLine, contains('--example demo'));
++  });
++
++  test('a metadata failure never starts cargo run', () async {
++    final (code, output, errors) = await run(
++      'src/alt.rs',
++      environment: {'QFLI_FAKE_MODE': 'metadata-fail'},
++    );
++    expect(code, kProgramNotRunExitCode);
++    expect(output, isEmpty);
++    expect(errors.join('\n'), contains('cargo metadata'));
++    expect(errors.where((line) => line.startsWith('CARGO_RUN')), isEmpty);
++  });
++
++  test('an unregistered source uses standalone rustc, not cargo run', () async {
++    final (code, output, errors) = await run(
++      'src/alt.rs',
++      environment: {
++        'QFLI_FAKE_METADATA': metadataFor([('primary', 'src/main.rs')]),
++      },
++    );
++    expect(code, 0, reason: errors.join('\n'));
++    expect(output, ['standalone-output']);
++    expect(errors.where((line) => line.startsWith('CARGO_RUN')), isEmpty);
++  });
++
++  test(
++    'a non-runnable registered source fails instead of running another target',
++    () async {
++      final metadata = jsonEncode({
++        'packages': [
++          {
++            'name': 'fake_pkg',
++            'manifest_path': p.join(project.path, 'Cargo.toml'),
++            'targets': [
++              {
++                'name': 'primary',
++                'src_path': p.join(project.path, 'src', 'main.rs'),
++                'kind': ['bin'],
++                'crate_types': ['bin'],
++              },
++              {
++                'name': 'fake_pkg',
++                'src_path': p.join(project.path, 'src', 'lib.rs'),
++                'kind': ['lib'],
++                'crate_types': ['lib'],
++              },
++            ],
++          },
++        ],
++      });
++      File(p.join(project.path, 'src', 'lib.rs')).writeAsStringSync('');
++      final (code, output, errors) = await run(
++        'src/lib.rs',
++        environment: {'QFLI_FAKE_METADATA': metadata},
++      );
++      expect(code, kProgramNotRunExitCode);
++      expect(output, isEmpty);
++      expect(errors.join('\n'), contains('不可运行'));
++      expect(errors.where((line) => line.startsWith('CARGO_RUN')), isEmpty);
++    },
++  );
++
++  test('malformed metadata fails instead of falling back', () async {
++    final (code, output, errors) = await run(
++      'src/alt.rs',
++      environment: {'QFLI_FAKE_METADATA': '{"packages": "nope"}'},
++    );
++    expect(code, kProgramNotRunExitCode);
++    expect(output, isEmpty);
++    expect(errors.join('\n'), contains('无法解析'));
++    expect(errors.where((line) => line.startsWith('CARGO_RUN')), isEmpty);
++  });
++
++  test(
++    'cancellation during metadata returns 130',
++    () async {
++      File(
++        p.join(project.path, 'src', 'alt.rs'),
++      ).writeAsStringSync('fn main() {}');
++      final result =
++          await runner(environment: {'QFLI_FAKE_MODE': 'metadata-hang'}).run(
++            projectPath: project.path,
++            entryFile: p.join(project.path, 'src/alt.rs'),
++          );
++      expect(result, isNotNull);
++      // Consume both streams live so the ready marker is observed as soon as
++      // it is flushed, and so an unread pipe cannot stall metadata.
++      final outputLines = <String>[];
++      final errorLines = <String>[];
++      final ready = Completer<void>();
++      final outDone = result!.stdout.listen(outputLines.add).asFuture<void>();
++      final errDone = result.stderr.listen((line) {
++        errorLines.add(line);
++        if (line == 'FAKE_METADATA_READY' && !ready.isCompleted) {
++          ready.complete();
++        }
++      }).asFuture<void>();
++      // Wait for the deterministic marker the fake cargo writes and flushes
++      // *before* blocking, then cancel the live metadata process.
++      await ready.future.timeout(const Duration(seconds: 20));
++      await result.cancel!().timeout(const Duration(seconds: 20));
++      expect(await result.exitCode, 130);
++      await Future.wait([outDone, errDone]);
++      expect(errorLines.where((line) => line.startsWith('CARGO_RUN')), isEmpty);
++      // Metadata JSON must never leak onto either user stream.
++      expect(outputLines.join('\n'), isNot(contains('packages')));
++      expect(errorLines.join('\n'), isNot(contains('packages')));
++    },
++    timeout: const Timeout(Duration(seconds: 40)),
++  );
++}
++
++String _dartExecutable() {
++  final executable = Platform.isWindows ? 'dart.exe' : 'dart';
++  final candidates = <String>[
++    if (Platform.environment['FLUTTER_ROOT'] case final root?
++        when root.isNotEmpty)
++      p.join(root, 'bin', 'cache', 'dart-sdk', 'bin', executable),
++    // The Flutter-bundled SDK often sits three levels above the test runner.
++    p.join(
++      p.dirname(p.dirname(Platform.resolvedExecutable)),
++      'cache',
++      'dart-sdk',
++      'bin',
++      executable,
++    ),
++  ];
++  for (final candidate in candidates) {
++    if (File(candidate).existsSync()) return candidate;
++  }
++  return executable;
++}
+--- /dev/null
++++ b/test/rust_editor_run_test.dart
+@@ -0,0 +1,289 @@
++import 'dart:convert';
++import 'dart:io';
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:path/path.dart' as p;
++import 'package:qfli_rust/main.dart' show rustProfile;
++import 'package:qfli_rust/rust_run_title.dart';
++import 'package:qfli_studio_core/editor/editor_page.dart';
++import 'package:qfli_studio_core/editor/terminal_pane.dart';
++import 'package:qfli_studio_core/models/project.dart';
++import 'package:qfli_studio_core/services/project_config.dart';
++import 'package:qfli_studio_core/services/studio_profile.dart';
++import 'package:qfli_studio_core/store/auth_store.dart';
++import 'package:qfli_studio_core/store/project_store.dart';
++import 'package:qfli_studio_core/store/settings_store.dart';
++import 'package:re_editor/re_editor.dart';
++
++const _runTooltip = '运行（长按运行当前文件）';
++
++/// Rust profile gesture seam: tap runs the configured entry, long press runs
++/// the active source, and the configured entry / Cargo manifest stay intact.
++///
++/// The shared editor already owns the gesture wiring; this test pins the Rust
++/// product contract (entry file names, `.rs` runnability, selected-source
++/// routing) against the real `rustProfile` object rather than a Java fixture.
++void main() {
++  late _RustEditorFixture fixture;
++  late StudioProfile? previousProfile;
++
++  setUp(() {
++    previousProfile = StudioProfile.current;
++    fixture = _RustEditorFixture();
++  });
++
++  tearDown(() async {
++    StudioProfile.current = previousProfile;
++    await fixture.dispose();
++  });
++
++  testWidgets('tap, long press, tap run main.rs, main2.rs, main.rs', (
++    tester,
++  ) async {
++    await fixture.mount(tester);
++    final config = File(ProjectConfig.configPath(fixture.project.path));
++    final originalConfig = config.readAsStringSync();
++    final cargo = File(p.join(fixture.project.path, 'Cargo.toml'));
++    final originalCargo = cargo.readAsStringSync();
++    final run = find.byTooltip(_runTooltip);
++
++    await tester.tap(run);
++    await _waitForRun(tester, fixture.runner, 1);
++    expect(fixture.runner.entries, [fixture.source('main.rs').path]);
++
++    await tester.longPress(run);
++    await _waitForRun(tester, fixture.runner, 2);
++    expect(fixture.runner.entries, [
++      fixture.source('main.rs').path,
++      fixture.source('main2.rs').path,
++    ]);
++
++    await tester.tap(run);
++    await _waitForRun(tester, fixture.runner, 3);
++    expect(fixture.runner.entries, [
++      fixture.source('main.rs').path,
++      fixture.source('main2.rs').path,
++      fixture.source('main.rs').path,
++    ]);
++    expect(config.readAsStringSync(), originalConfig);
++    expect(cargo.readAsStringSync(), originalCargo);
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets(
++    'long press saves edits to the active Rust source before running',
++    (tester) async {
++      await fixture.mount(tester);
++      final editor = tester.widget<CodeEditor>(find.byType(CodeEditor));
++      const edited = 'fn main() { println!("saved main2"); }\n';
++      editor.controller!.text = edited;
++      await tester.pump();
++      expect(fixture.source('main2.rs').readAsStringSync(), isNot(edited));
++
++      await tester.longPress(find.byTooltip(_runTooltip));
++      await _waitForRun(tester, fixture.runner, 1);
++
++      expect(fixture.runner.entries, [fixture.source('main2.rs').path]);
++      expect(fixture.runner.savedSources.single['main2.rs'], edited);
++      expect(fixture.source('main2.rs').readAsStringSync(), edited);
++    },
++  );
++
++  testWidgets(
++    'the terminal shows a concise run title without backend suffixes',
++    (tester) async {
++      await fixture.mount(tester);
++      await tester.tap(find.byTooltip(_runTooltip));
++      await _waitForRun(tester, fixture.runner, 1);
++
++      final pane = tester.state<TerminalPaneState>(find.byType(TerminalPane));
++      expect(pane.busy, isFalse);
++      final transcript = tester
++          .widgetList<SelectableText>(find.byType(SelectableText))
++          .map((widget) => widget.data!)
++          .toList();
++      expect(transcript, contains('${fixture.prompt} run main.rs'));
++      expect(transcript.any((line) => line.contains('（Rust）')), isFalse);
++      expect(transcript.any((line) => line.contains('Miri')), isFalse);
++      expect(transcript.any((line) => line.contains('exit code 0')), isFalse);
++    },
++  );
++}
++
++Future<void> _waitForRun(
++  WidgetTester tester,
++  _RecordingRustRunner runner,
++  int count,
++) async {
++  await _pumpIoUntil(
++    tester,
++    () =>
++        runner.entries.length >= count &&
++        find.byType(TerminalPane).evaluate().isNotEmpty &&
++        !tester.state<TerminalPaneState>(find.byType(TerminalPane)).busy,
++  );
++  await tester.pump();
++  expect(runner.entries, hasLength(count));
++}
++
++Future<void> _pumpIoUntil(
++  WidgetTester tester,
++  bool Function() condition,
++) async {
++  for (var attempt = 0; attempt < 200; attempt++) {
++    await tester.pump(const Duration(milliseconds: 20));
++    if (condition()) return;
++    await tester.runAsync(
++      () => Future<void>.delayed(const Duration(milliseconds: 10)),
++    );
++  }
++  expect(condition(), isTrue, reason: 'The editor operation did not finish.');
++}
++
++/// Records which absolute source the Rust profile received and returns a quiet,
++/// successful run so the gesture assertions stay focused on selection.
++class _RecordingRustRunner implements ProgramRunner {
++  final entries = <String>[];
++  final savedSources = <Map<String, String>>[];
++
++  @override
++  Future<ProgramRunResult?> run({
++    required String projectPath,
++    required String entryFile,
++  }) async {
++    if (p.extension(entryFile).toLowerCase() != '.rs') return null;
++    entries.add(p.normalize(p.absolute(entryFile)));
++    savedSources.add({
++      for (final file in Directory(projectPath).listSync().whereType<File>())
++        p.basename(file.path): file.readAsStringSync(),
++    });
++    return ProgramRunResult(
++      title: rustRunTitle(projectPath, entryFile),
++      stdout: Stream.value('ran ${p.basename(entryFile)}'),
++      stderr: const Stream.empty(),
++      exitCode: Future.value(0),
++    );
++  }
++}
++
++class _RustEditorFixture {
++  _RustEditorFixture() {
++    final projectDirectory = Directory(p.join(directory.path, 'project'))
++      ..createSync();
++    project = Project.create(
++      name: 'rust gesture project',
++      path: projectDirectory.path,
++    );
++    source('main.rs').writeAsStringSync('fn main() { println!("main"); }\n');
++    source('main2.rs').writeAsStringSync('fn main() { println!("main2"); }\n');
++    File(p.join(project.path, 'Cargo.toml')).writeAsStringSync('''
++[package]
++name = "qfli_gesture"
++version = "0.1.0"
++edition = "2021"
++''');
++    final config = File(ProjectConfig.configPath(project.path));
++    config.parent.createSync();
++    config.writeAsStringSync(
++      jsonEncode({'version': 1, 'entryFile': 'main.rs'}),
++    );
++  }
++
++  final directory = Directory.systemTemp.createTempSync('qfli_rust_gesture_');
++  final runner = _RecordingRustRunner();
++  final auth = AuthStore();
++  final store = ProjectStore();
++  final settings = SettingsStore();
++  late final Project project;
++
++  String get prompt {
++    final name = p.basename(p.normalize(project.path));
++    return Platform.isWindows ? '$name>' : '$name\$';
++  }
++
++  File source(String name) => File(p.join(project.path, name));
++
++  Future<void> mount(WidgetTester tester) async {
++    StudioProfile.current = _rustTestProfile(runner);
++    tester.view.physicalSize = const Size(1100, 850);
++    tester.view.devicePixelRatio = 1;
++    addTearDown(tester.view.resetPhysicalSize);
++    addTearDown(tester.view.resetDevicePixelRatio);
++    addTearDown(() async {
++      await tester.pumpWidget(const SizedBox.shrink());
++      if (!_disposed) {
++        _disposed = true;
++        auth.dispose();
++        store.dispose();
++        settings.dispose();
++      }
++      await _disposeFixtureTree(tester, directory);
++    });
++    await tester.pumpWidget(
++      MaterialApp(
++        home: EditorPage(
++          project: project,
++          auth: auth,
++          store: store,
++          settings: settings,
++          initialOpenPath: 'main2.rs',
++        ),
++      ),
++    );
++    await _pumpIoUntil(
++      tester,
++      () => find.byType(CodeEditor).evaluate().isNotEmpty,
++    );
++    await tester.pump(const Duration(milliseconds: 200));
++  }
++
++  var _disposed = false;
++
++  Future<void> dispose() async {
++    if (_disposed) return;
++    _disposed = true;
++    auth.dispose();
++    store.dispose();
++    settings.dispose();
++  }
++}
++
++/// A Rust profile whose runner is the recording fake; every other product
++/// field (entry names, extension filter, offline mode) stays identical to the
++/// shipped `rustProfile`.
++StudioProfile _rustTestProfile(ProgramRunner runner) => StudioProfile(
++  id: rustProfile.id,
++  appTitle: rustProfile.appTitle,
++  templates: rustProfile.templates,
++  isOffline: rustProfile.isOffline,
++  runner: runner,
++  productKey: rustProfile.productKey,
++  showHomeTabs: rustProfile.showHomeTabs,
++  supportedFileExtensions: rustProfile.supportedFileExtensions,
++  entryFileNames: rustProfile.entryFileNames,
++);
++
++Future<void> _disposeFixtureTree(
++  WidgetTester tester,
++  Directory directory,
++) async {
++  // `EditorPage.dispose()` schedules an unawaited history.json write. Inside
++  // `testWidgets` it runs in the FakeAsync zone; alternate both zones until the
++  // open file handle is released, matching the shared editor test convention.
++  const maxRounds = 50;
++  FileSystemException? lastError;
++  for (var round = 0; round < maxRounds; round++) {
++    try {
++      if (directory.existsSync()) await directory.delete(recursive: true);
++      return;
++    } on FileSystemException catch (error) {
++      lastError = error;
++      await tester.pump(const Duration(milliseconds: 20));
++      await tester.runAsync(
++        () => Future<void>.delayed(const Duration(milliseconds: 20)),
++      );
++    }
++  }
++  throw lastError!;
++}

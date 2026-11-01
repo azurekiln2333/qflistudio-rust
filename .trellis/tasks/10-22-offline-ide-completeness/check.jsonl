@@ -1,0 +1,8 @@
+{"file":".trellis/spec/frontend/content-imports.md","reason":"Complete catalog execution coverage and unchanged source imports"}
+{"file":".trellis/spec/backend/native-runtime.md","reason":"Native ABI safety and distinct host/device proof"}
+{"file":".trellis/spec/backend/offline-analysis.md","reason":"Exact immutable unsaved source, compiler diagnostics and cleanup ownership"}
+{"file":".trellis/spec/backend/offline-debugger.md","reason":"Actual pause/step/scalar generations, Unicode output and joined destruction"}
+{"file":".trellis/spec/backend/catalog-audit.md","reason":"Complete current inventory, exact report identity and retryable audit cleanup"}
+{"file":".trellis/spec/frontend/rust-tools.md","reason":"Direct offline Rust tools and unchanged common-tool navigation"}
+{"file":".trellis/spec/backend/rust-terminal.md","reason":"Preserve offline execution and cancellation semantics"}
+{"file":".trellis/tasks/10-22-offline-ide-completeness/research/acceptance.md","reason":"Every original requirement remains subject to current evidence"}

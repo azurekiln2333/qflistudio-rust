@@ -7,6 +7,7 @@ use profile seams and must preserve shared navigation and editable source.
 | Guide | Scope |
 | --- | --- |
 | [Content Imports](./content-imports.md) | Local curriculum catalogs, complete Cargo imports, path validation and rollback |
+| [Rust Tools](./rust-tools.md) | Direct offline numeric/string/project tools and common-tool navigation |
 | [Native Runtime](../backend/native-runtime.md) | Dart FFI, asset preparation, platform identity and cancellation |
 | [Rust Run Controls](../backend/rust-run-controls.md) | Editor gestures, selected source and run titles |
 | [Rust Terminal](../backend/rust-terminal.md) | Both terminal surfaces and offline command handling |

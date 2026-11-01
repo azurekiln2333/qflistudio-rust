@@ -1,0 +1,189 @@
+*** Begin Patch
+*** Update File: D:/MyNewProjects/qfli_studio_core/lib/pages/local_content_pages.dart
+@@
+   @override
+   Widget build(BuildContext context) {
+     final theme = Theme.of(context);
+-    return ListView(
++    return _ContentList(
+       padding: const EdgeInsets.only(top: 8, bottom: 32),
+       children: [
+         for (final chapter in tutorial.chapters) ...[
+@@
+   Widget build(BuildContext context) {
+     final theme = Theme.of(context);
+     final l10n = StudioLocalizations.of(context);
+-    return ListView(
++    return _ContentList(
+       padding: const EdgeInsets.only(top: 8, bottom: 32),
+       children: [
+         Padding(
+@@
+     final l10n = StudioLocalizations.of(context);
+     return Scaffold(
+       appBar: AppBar(title: Text(widget.example.title)),
+-      body: ListView(
++      body: _ContentList(
+         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+         children: [
+           Text(widget.example.summary),
+@@
+     final l10n = StudioLocalizations.of(context);
+     return Scaffold(
+       appBar: AppBar(title: Text(lesson.title)),
+-      body: ListView(
++      body: _ContentList(
+         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+         children: [
+           Text(lesson.summary, style: theme.textTheme.titleMedium),
+@@
+   }
+ }
+ 
++class _ContentList extends StatelessWidget {
++  const _ContentList({required this.padding, required this.children});
++
++  final EdgeInsetsGeometry padding;
++  final List<Widget> children;
++
++  @override
++  Widget build(BuildContext context) => Align(
++    alignment: Alignment.topCenter,
++    child: ConstrainedBox(
++      constraints: const BoxConstraints(maxWidth: 960),
++      child: ListView(padding: padding, children: children),
++    ),
++  );
++}
++
+ class _LocalContentError extends StatelessWidget {
+   const _LocalContentError({required this.message});
+ 
+*** Update File: D:/MyNewProjects/qfli_studio_core/test/content_code_import_test.dart
+@@
+     root = await Directory.systemTemp.createTemp('qfli_content_import_');
+     originalPaths = PathProviderPlatform.instance;
+     PathProviderPlatform.instance = _TemporaryPaths(root.path);
++  });
++
++  setUp(() {
++    for (final asset in ['tutorials', 'examples']) {
++      rootBundle.evict('assets/content/$asset.json');
++      rootBundle.evict('packages/qfli_studio_core/assets/content/$asset.json');
++    }
+     final messenger =
+         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+     messenger.setMockMessageHandler('flutter/assets', (message) async {
+@@
+           ? null
+           : ByteData.sublistView(Uint8List.fromList(utf8.encode(source)));
+     });
+-  });
+-
+-  setUp(() {
+     directory = root.createTempSync('case_');
+     final defaults = File(p.join(root.path, 'examples.json'));
+     if (defaults.existsSync()) defaults.deleteSync();
+@@
+           isTrue,
+         );
+         await tester.tap(find.text(title));
+-        await tester.pump(const Duration(milliseconds: 400));
++        await _settleRoute(tester);
+         _expectDetail(tester, examplesPage: examplesPage);
+         expect(tester.takeException(), isNull);
+       },
+@@
+     await tester.enterText(find.byType(TextField), _editedCode);
+     final l10n = _l10n(tester);
+     await tester.ensureVisible(find.byTooltip(l10n.saveExample));
++    await tester.pump();
+     await tester.tap(find.byTooltip(l10n.saveExample));
+     await _waitFor(tester, () {
+       final file = File(p.join(directory.path, 'examples.json'));
+@@
+       expect(tester.widget<IconButton>(save).onPressed, isNotNull);
+       await tester.enterText(find.byType(TextField), _editedCode);
+       await tester.ensureVisible(save);
++      await tester.pump();
+       await tester.tap(save);
+       await tester.pump();
+       await _waitFor(
+@@
+       );
+       final reset = find.byTooltip(_l10n(tester).restoreDefault);
+       await tester.ensureVisible(reset);
++      await tester.pump();
+       await tester.tap(reset);
+       await tester.pump();
+       expect(
+@@
+       final l10n = _l10n(tester);
+       final save = find.byTooltip(l10n.saveExample);
+       await tester.ensureVisible(save);
++      await tester.pump();
+       await tester.tap(save);
+       await _waitFor(
+         tester,
+@@
+           );
+           expect(tester.takeException(), isNull);
+           await tester.tap(find.text(title));
+-          await tester.pump(const Duration(milliseconds: 400));
++          await _settleRoute(tester);
+           _expectDetail(tester, examplesPage: examplesPage);
+           expect(tester.takeException(), isNull);
+           await _importDialog(tester, intoProject: true);
+           expect(tester.takeException(), isNull);
+           final action = find.byKey(const ValueKey('import-code-confirm'));
+           await tester.ensureVisible(action);
++          await tester.pump();
+           final rectangle = tester.getRect(action);
+           expect(rectangle.left, greaterThanOrEqualTo(0));
+           expect(rectangle.right, lessThanOrEqualTo(size.width));
+@@
+   );
+   await tester.pump(const Duration(milliseconds: 400));
+   await tester.tap(find.text(title));
+-  await tester.pump(const Duration(milliseconds: 400));
++  await _settleRoute(tester);
+   _expectDetail(tester, examplesPage: examplesPage, expectedCode: expectedCode);
+ }
+ 
+@@
+     intoProject ? l10n.importCodeProject : l10n.importCodeEditor,
+   );
+   await tester.ensureVisible(command);
++  await tester.pump();
+   await tester.tap(command);
+-  await tester.pump(const Duration(milliseconds: 400));
++  await _settleRoute(tester);
+   expect(find.byKey(const ValueKey('import-file-name')), findsOneWidget);
+ }
+ 
+@@
+ Future<void> _chooseProject(WidgetTester tester, Project project) async {
+   final target = find.byKey(const ValueKey('import-target-project'));
+   await tester.tap(target);
+-  await tester.pump(const Duration(milliseconds: 400));
++  await _settleRoute(tester);
+   await tester.tap(find.text(project.name).last);
+-  await tester.pump(const Duration(milliseconds: 400));
++  await _settleRoute(tester);
+   expect(find.byKey(const ValueKey('import-project-name')), findsNothing);
+ }
+ 
+@@
+   expect(find.byType(AlertDialog), findsNothing);
+ }
+ 
++Future<void> _settleRoute(WidgetTester tester) async {
++  await tester.pump();
++  await tester.pump(const Duration(milliseconds: 400));
++  await tester.pump();
++}
++
+ Future<void> _waitFor(
+   WidgetTester tester,
+   bool Function() condition,
+*** End Patch

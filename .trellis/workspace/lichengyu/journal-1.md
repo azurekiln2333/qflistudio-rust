@@ -127,3 +127,84 @@ Verified Rust-only three-Pi delivery, offline terminals, 166 complete lessons/ex
 
 - Obtain production Android signing and matching Rust OHOS signing, then verify signed packaged OHOS source execution; no unrelated credentials or device-policy changes.
 - Retain readiness/OHOS/cross-platform tasks for actual remaining acceptance; Windows-native adapter/sysroot and Apple-host checks remain in broader task. Physical device explicitly released to Go; owned emulator/privateADB cleaned up.
+
+
+## Session 4: Trilingual README and fresh Rust readiness checkpoint
+<!-- trellis-session: v=2 fp=1af5e621fed9263f -->
+
+**Date**: 2026-10-26
+**Task**: Trilingual README and fresh Rust readiness checkpoint
+**Branch**: `feat/rust-offline-ide-20261022`
+
+### Summary
+
+Session summary was not supplied.
+
+### Main Changes
+
+- Rewrote Simplified Chinese, Traditional Chinese and English README editions with equivalent features, commands and platform limitations.
+- Published controlled-Chinese checker and README language contract; preserved unrelated source changes.
+- Used four actual Rust Herdr Pi panes, retried terminal connection failures and restored exited Pi sessions without resetting WSL or killing foreign processes.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dd3343b` | docs: add trilingual README and controlled Chinese checks |
+| `553e139` | docs: align README terminology and platform limits |
+
+### Testing
+
+- [OK] Both Chinese READMEs passed default and strict25 checks with zero findings; checker selftest20 passed; independent final review passed.
+- [OK] Relative links, three identical fenced blocks and actual166 tutorials plus166 examples verified; no native/SDK/device execution.
+- [OK] 553e139 exact remote branch hash verified on GitHub/Gitee/GitCode/CNB. GitLab HTTPS lacked noninteractive credentials; existing SSH retry timed out with owned Job empty.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- C592 explicitly defers this Rust queue turn. Runtime ownership controls remain unrun; Native90 and separate Dart110 require fresh named grants after source freeze refresh.
+- Four actual Pi panes continue disjoint source-only compiler boundary, owned-controls, packaged-runtime and full-goal evidence tasks. Keep umbrella task in_progress.
+
+
+## Session 5: Rust compiler provenance and archive gate checkpoint
+<!-- trellis-session: v=2 fp=8c895e411a03ccaf -->
+
+**Date**: 2026-10-26
+**Task**: Rust compiler provenance and archive gate checkpoint
+**Branch**: `feat/rust-offline-ide-20261022`
+
+### Summary
+
+Bound compiler and adapter provenance. Added complete ABI and archive checks. Preserved the open OHOS acceptance gate.
+
+### Main Changes
+
+- Verified and pushed scoped compiler provenance and archive inspector commits to four remotes.
+- Four Herdr Pi panes implemented and reviewed source fixes. Retried the observed Pi connection failure.
+- Authored spanless diagnostic and invalid UTF8 regressions. Actual SDK and native checks remain unrun.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aa8594a` | build: bind native adapters to patched compiler provenance |
+| `b8a69a8` | feat(audit): verify Rust archive ABI and compiler provenance |
+
+### Testing
+
+- [OK] 81 compiler provenance pure tests and 58 runner control pure tests passed.
+- [OK] Minimal committed-dependency tree passed 144 inspector and catalog pure tests plus both generation drift checks.
+- [OK] Changed Chinese prose fields passed scoped controlled-language checks. Program bytes and expected output were preserved.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Keep task in progress. Add explicit analysis mirror-root handling and verified non-OHOS loader support.
+- Refreeze current core metadata and exact source identities before requesting fresh bounded runtime grants.
+- Build patched compiler and adapters. Run actual ABI and OHOS catalog acceptance before adding topics.

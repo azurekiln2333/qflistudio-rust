@@ -8,6 +8,8 @@ Read the contract for the layer being changed before implementing it.
 | --- | --- |
 | [Native Runtime](./native-runtime.md) | Pinned rustc/Miri ABI, architecture packages, signing and device evidence |
 | [Compiler Build Provenance](./compiler-build-provenance.md) | Patched compiler identities, immutable inputs and package hash binding |
+| [Offline Analysis](./offline-analysis.md) | Exact unsaved compiler diagnostics and cancellation ownership |
+| [Offline Debugger](./offline-debugger.md) | Real Miri pauses, copied values, generations and joined cleanup |
 | [Catalog Audit](./catalog-audit.md) | Complete inventory, exact output, durable reports and final HAP inspection |
 | [Rust Run Controls](./rust-run-controls.md) | Cargo target selection, editor gestures and continuous terminal titles |
 | [Rust Terminal](./rust-terminal.md) | Shared delegates, offline Cargo and real process execution |

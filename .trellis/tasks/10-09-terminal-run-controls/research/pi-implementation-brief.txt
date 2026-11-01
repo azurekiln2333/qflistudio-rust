@@ -1,0 +1,17 @@
+Active task: .trellis/tasks/10-09-terminal-run-controls
+
+用户已明确批准最终规划，task.py start 已将任务切换为 in_progress。你现在就是本任务的 trellis-implement 子代理，请直接实施，不要再派 implement/check 子代理，不要重新规划或向用户重复确认。我负责指挥与验收。
+
+先读取 prd.md、design.md、implement.md、implement.jsonl 引用的规范/research，以及 .agents/skills/trellis-before-dev/SKILL.md；需要角色细则可读 .trellis/agents/implement.md。严格按已批准方案实施。
+
+你不是唯一工作者：Java 版及其他语言会话正在共用 ../qfli_studio_core。不要修改或格式化共享核心、不要回退任何他人改动、不要提交或更改分支/任务状态。你的产品文件所有权限定为 lib/rust_runner.dart、lib/native_miri_runner.dart、必要的新 Rust-local Cargo target helper、test/rust_app_test.dart、test/native_miri_runner_test.dart，以及必要的新 focused target/editor tests。主协调负责所有规范、任务和最终提交。基线已保存在 research/baseline，那里是本轮改动前内容（包含早先用户工作），不能用 git HEAD 覆盖。
+
+实施要求：
+1. 桌面与 NativeMiriProgramRunner 的 title 都为简短 run <project-relative source>，去除中文运行、Rust/Miri/JDK 后端后缀；保留 program stdout/stderr 原样。直接修改 native runner 的 title，不要只在 wrapper 返回时遮盖。
+2. Cargo.toml 存在时以 cargo metadata --no-deps --format-version 1 的 targets.src_path 精确匹配 entryFile；使用 Cargo 返回的 package/manifest/target name，显式 --bin 或可执行 --example。不要用文件名猜 target 名，不要改写 Cargo.toml。
+3. 元数据成功但普通 .rs 未注册目标时用现有 rustc 单文件编译路线。元数据失败、歧义、已注册但不可运行的 target 应给出失败，不要静默回跑默认 main。只有独立文件不继承 Cargo 外部依赖，这是已批准的边界。
+4. 所有新增子进程必须经过现有可取消 _runProcess/stream lifecycle，包括 metadata；metadata JSON stdout 不得泄漏到终端。保持 compiler flags、RUSTC、linker config、input.txt 和退出码契约。
+5. 补有意义的回归：Cargo 多入口与自定义名字/path，普通 main2.rs，metadata 错误/非可执行/歧义，真实 Rust profile 的 tap/long-press/tap 和配置保持。复用 shared editor 测试中的正确 FakeAsync I/O 清理规律，不要测试只证明实现本身。
+6. 完成后运行 scoped format、analyze、focused tests。Flutter 路径 D:/ProgramFiles/flutter_ohos/bin；普通 PATH 没有 rustc/cargo，旧临时 GNU 工具链已不存在，不得把 skipped 用例报告为通过。本协调已刚跑过 core 两个 focused test，共 22 pass；无需重复或修改它们。本协调也运行了四个已有 Rust source/test 文件的 dart analyze，baseline 无问题。
+
+请现在开始实施，完成后明确报告你改动的文件、验证结果、跳过项和任何待验收问题。任何新发现导致扩大范围时先向我报告，不要自行改共享核心。

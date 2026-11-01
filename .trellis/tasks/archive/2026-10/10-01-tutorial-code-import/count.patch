@@ -1,0 +1,12 @@
+*** Begin Patch
+*** Update File: D:/MyNewProjects/qfli_studio_core/lib/i18n/studio_localizations.dart
+@@
+-    'examplesCount': '来自本地教程的 {count} 个示例',
++    'examplesCount': '{count} 个示例',
+@@
+-    'examplesCount': '來自本機教學的 {count} 個範例',
++    'examplesCount': '{count} 個範例',
+@@
+-    'examplesCount': '{count} examples from the bundled tutorial',
++    'examplesCount': '{count} examples',
+*** End Patch

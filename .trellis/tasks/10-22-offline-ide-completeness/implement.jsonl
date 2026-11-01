@@ -1,0 +1,9 @@
+{"file":".trellis/spec/frontend/content-imports.md","reason":"Rust catalog/import contracts and host versus mobile execution evidence"}
+{"file":".trellis/spec/backend/native-runtime.md","reason":"Pinned rustc/Miri ABI, native packaging and signed device acceptance"}
+{"file":".trellis/spec/backend/offline-analysis.md","reason":"Real metadata-only unsaved compiler analysis and exact diagnostic mapping"}
+{"file":".trellis/spec/backend/offline-debugger.md","reason":"Native debugger state, generation and cleanup contracts"}
+{"file":".trellis/spec/backend/catalog-audit.md","reason":"Catalog and native feature report completeness, input lifetime and package proof"}
+{"file":".trellis/spec/frontend/rust-tools.md","reason":"Direct substantive Rust tool cards with offline behavior"}
+{"file":".trellis/spec/backend/rust-terminal.md","reason":"Offline terminal compiler routing and cancellation"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Typed compiler diagnostics across native/profile/editor boundaries"}
+{"file":".trellis/tasks/10-22-offline-ide-completeness/research/acceptance.md","reason":"Current full-scope evidence and shared ownership"}

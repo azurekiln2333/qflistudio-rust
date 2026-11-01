@@ -1,0 +1,11 @@
+*** Begin Patch
+*** Update File: D:/MyNewProjects/qfli_studio_core/test/content_code_import_test.dart
+@@
+   setUp(() {
++    for (final asset in ['tutorials', 'examples']) {
++      rootBundle.evict('assets/content/$asset.json');
++      rootBundle.evict('packages/qfli_studio_core/assets/content/$asset.json');
++    }
+     final messenger =
+         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+*** End Patch

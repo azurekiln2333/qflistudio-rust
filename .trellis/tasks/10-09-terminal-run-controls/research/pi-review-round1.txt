@@ -1,0 +1,10 @@
+Active task: .trellis/tasks/10-09-terminal-run-controls
+
+我已查看你写出的第一版，继续完成时请先修这几项（都在原有范围内）：
+1. rust_runner.dart：metadata 阶段取消现在由 _resolveCargoPlan 返回 error，start 随即返回 127，破坏取消必须为 130 的契约。await _resolveCargoPlan 后先处理 _cancelled，补真正覆盖该路径的测试。
+2. cargo_targets.dart：decodeCargoTargets 丢弃 lib/test/bench/build-script，所以 selectCargoTarget 永远无法发现已登记的不可运行源，最后误判 Unregistered 并交给 rustc。请在解码时保留源文件的非运行目标归属；匹配后明确拒绝，不可回落。example 还要检查 crate_types 含 bin，库形式的 example 不可 run。
+3. `(target[kind] as List?)` 遇到错误类型会抛 TypeError；畸形 packages/targets 当前有多处 continue，会把坏元数据当成普通未登记文件。请使用显式类型检查并统一 FormatException，保证坏 JSON/坏 schema 不会逃出 Future 或错误回落。
+4. rust_run_title.dart 按已批准设计处理含空格路径的引号，例如 run "src/my file.rs"。Native runner 已能自己生成正确 title，外层无需再复制 ProgramRunResult 来拦截自定义 runner，请保留原来的透明转发。
+5. 测试不应只有纯 helper 和因缺 cargo 全部 skip 的用例。请考虑使用 Dart SDK 编译一个小的测试专用 fake toolchain executable（放测试临时目录且严守精确路径清理），通过现有 cargoExecutable/rustcExecutable 注入，验证 metadata stdout 私有、确实选择 --bin/--example、元数据失败不启动 run、取消返回 130 等进程接线。禁止增加仅为测试服务的生产注入层。若代价过大先报告给我，我会负责这一部分。
+
+我已生成并目检 5 张 Rust 标题布局图，桌面/手机/浅色/短窗口/长路径均连续，5 个渲染用例通过。不要修改 research 下的主协调视觉夹具。请继续，不需要对上述要求逐条聊天确认。

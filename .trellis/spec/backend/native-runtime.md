@@ -16,6 +16,9 @@ uint32_t qfli_miri_abi_version(void);
 QfliSession *qfli_miri_create(const QfliConfig *config);
 QfliSession *qfli_miri_create_with_backend(const QfliConfig *config,
                                          const char *backend_path);
+QfliSession *qfli_miri_create_with_project(const QfliConfig *config,
+                                         const char *backend_path,
+                                         const char *project_root);
 int32_t qfli_miri_run(QfliSession *session);
 void qfli_miri_cancel(QfliSession *session);
 size_t qfli_miri_copy_output(const QfliSession *session, uint32_t channel,
@@ -54,6 +57,26 @@ restore them in `finally` after verification.
   diagnostics. Basic-block, time and guest-memory limits must be positive.
 - Run once, off the Flutter UI isolate. Poll/cancel/result may overlap run;
   destroy must follow all active calls. Keep the library loaded for the process.
+- The additive project constructor takes an absolute explicit project directory,
+  checks canonical source containment and creates a per-session filesystem
+  capability on supported Linux/Android hosts (including OHOS). Existing create
+  symbols use the canonical source parent as their limited root. Pass the full
+  project root from new callers; do not infer it from the host process cwd.
+- Filesystem operations use descriptor-relative no-follow paths, a session cwd
+  and an exclusively created mode0700 temporary inside the project. Destruction
+  after worker exit removes only that session temporary. Do not enable global
+  Miri communication to make files work: networking and ambient guest environment
+  remain isolated. Unsupported hosts retain the existing pure-code runner.
+- Retain a descriptor for the session temporary and compare no-follow directory
+  device/inode identity before recursive cleanup. If the guest renamed it or
+  replaced its old name, leave both entries untouched; never delete replacement
+  project data or chase a renamed temporary through guest-chosen paths. Roll back
+  a failed initial descriptor acquisition only with nonrecursive empty-directory
+  removal. Cleanup follows interpreter exit; concurrent external host namespace
+  mutation is outside this capability's guarantees.
+- This guest filesystem capability does not restrict rustc's own source loading
+  or env macros. Real include/env negative probes with prepared outside data are
+  a separate compiler boundary; a missing file cannot prove source confinement.
 - Results: state 2 finished/user exit, 3 cancelled/130, 4 limit/124,
   5 internal failure/1. Ready/running states 0/1 have no final exit status.
 - Use a fixed `x86_64-unknown-linux-gnu` interpreted guest on both OHOS hosts.
@@ -117,6 +140,8 @@ restore them in `finally` after verification.
 | Null or already-run session | run returns -1 |
 | Compiler error | upstream diagnostic channel, final exit 1 |
 | Cancellation or execution limit | final state 3/4, exit 130/124 |
+| Explicit root invalid or canonical source outside it | create returns null |
+| Runtime filesystem probes pass, compiler probes fail | fs ABI exit4; compiler boundary remains open |
 | Missing library/ABI mismatch in Dart | ProgramRunResult failure |
 | Invalid manifest or extraction failure | preparation throws; next run may retry |
 | Build input does not match pinned revision | stop before compilation |
@@ -140,6 +165,16 @@ restore them in `finally` after verification.
   executing an older result. Do not claim external Cargo dependency support.
 
 ## 6. Required Evidence
+
+Run `fs_abi_test.c` against the actual pinned adapter with prepared outside
+sentinels, symlinks, isolated environment and two simultaneously alive sessions.
+Assert real disk roundtrip, independent cwd, unchanged host cwd/outside bytes,
+owned temporary cleanup and actual socket isolation. Export exact authored164/165
+sources and outputs. Include a guest rename/replacement cleanup probe with real
+ordinary-directory sentinel bytes that must survive destruction. Retain compiler-
+boundary exit4 separately. Then run the old stream/limit/cancel ABI suite and
+every catalog main/answer. Capability module
+unit tests alone do not establish interpreter or device filesystem behavior.
 
 Linux reference evidence is in the task's `research/miri-adapter-validation.md`:
 diagnostics, I/O, nonzero exit, limits, cancellation and a fresh subsequent run.

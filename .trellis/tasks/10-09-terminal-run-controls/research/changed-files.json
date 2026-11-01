@@ -1,0 +1,42 @@
+[
+  {
+    "file": "lib/rust_runner.dart",
+    "base": "pre-task snapshot",
+    "sha256": "b796db972103113ab4026d516b83b89db776cd3ec1f2c8529bf6e0cc033ec315"
+  },
+  {
+    "file": "lib/native_miri_runner.dart",
+    "base": "pre-task snapshot",
+    "sha256": "f4eaa1ec9b32501be44ce66c80cd089c835fcea47c1f99b65e3c375d016e1130"
+  },
+  {
+    "file": "test/rust_app_test.dart",
+    "base": "pre-task snapshot",
+    "sha256": "4255f6856696f1bab21da717339b10d2ffb25776af604980dbdb78106d869a96"
+  },
+  {
+    "file": "lib/cargo_targets.dart",
+    "base": "new in task",
+    "sha256": "e94fa8e0e5f05ae48e2cf1733820689a9e5e3af7083b7f4df50db1d32c1eaca6"
+  },
+  {
+    "file": "lib/rust_run_title.dart",
+    "base": "new in task",
+    "sha256": "cf5c540faa621973ff171cd7a9ee8b9589c05fed9dc8cafc3694daebfcd4e8cd"
+  },
+  {
+    "file": "test/cargo_targets_test.dart",
+    "base": "new in task",
+    "sha256": "65b8917be7cf0d2d7a4ef94b3f17645c805136371066c53f1cd006a77d9ae876"
+  },
+  {
+    "file": "test/cargo_process_wiring_test.dart",
+    "base": "new in task",
+    "sha256": "ae3c772088d8affaa9ad0d34e59b02a74966097e6beb2479c4a0e20aa32df190"
+  },
+  {
+    "file": "test/rust_editor_run_test.dart",
+    "base": "new in task",
+    "sha256": "62fc1ee0dd6c27796961250ab75887c3166aec69d1ebb44b60f90b13a3b59a82"
+  }
+]
