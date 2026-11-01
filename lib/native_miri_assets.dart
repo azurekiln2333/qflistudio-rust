@@ -24,9 +24,24 @@ class NativeMiriTarget {
   final String architecture;
 
   String get key => '$platform-$architecture';
-  String get manifestAsset => platform == 'ohos'
-      ? 'assets/miri/manifest.json'
-      : 'assets/miri/manifest.$key.json';
+  String get manifestAsset => 'assets/miri/manifest.$key.json';
+
+  /// Older OHOS packages contain only the single-architecture manifest.
+  Future<String> loadManifest(AssetBundle bundle) async {
+    try {
+      return await bundle.loadString(manifestAsset);
+    } catch (error, stackTrace) {
+      if (platform != 'ohos') rethrow;
+      // A failed read alone cannot distinguish an absent asset from a damaged
+      // installed asset. Fall back only when the package inventory proves it
+      // does not contain the architecture-specific manifest.
+      final inventory = await AssetManifest.loadFromAssetBundle(bundle);
+      if (inventory.listAssets().contains(manifestAsset)) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+      return bundle.loadString('assets/miri/manifest.json');
+    }
+  }
 
   Set<String> get nativeHosts => switch ((platform, architecture)) {
     ('ohos', 'arm64') => {'aarch64-unknown-linux-ohos'},
@@ -103,7 +118,7 @@ class NativeMiriAssets {
       );
     }
     final manifest = _RuntimeManifest.decode(
-      jsonDecode(await _bundle.loadString(target.manifestAsset)),
+      jsonDecode(await target.loadManifest(_bundle)),
       target,
     );
     final storage = await _storageDirectory();
@@ -210,7 +225,8 @@ class _RuntimeManifest {
     final schemaVersion = value['schemaVersion'] as int;
     if (schemaVersion == 1 && target.platform != 'ohos' ||
         schemaVersion == 2 &&
-            (value['platform'] != target.platform ||
+            (target.platform == 'ohos' ||
+                value['platform'] != target.platform ||
                 value['architecture'] != target.architecture ||
                 value['nativeLibraries'] is! List)) {
       throw const FormatException(

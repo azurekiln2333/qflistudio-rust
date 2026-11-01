@@ -13,11 +13,14 @@ import 'package:qfli_studio_core/splash_screen.dart';
 import 'package:qfli_studio_core/store/auth_store.dart';
 import 'package:qfli_studio_core/store/settings_store.dart';
 
+import 'native_miri_analyzer.dart';
 import 'ohos_native_probe.dart';
+import 'rust_code_analyzer.dart';
 import 'rust_content_repository.dart';
 import 'rust_project_store.dart';
 import 'rust_runner.dart';
 import 'rust_terminal_commands.dart';
+import 'rust_tools_tab.dart';
 
 /// 本 App 的产品名。窗口标题、任务切换器和应用内顶栏都读它。
 const String _appTitle = StudioProductCatalog.rustCore;
@@ -31,6 +34,16 @@ final StudioProfile rustProfile = StudioProfile(
   templates: [ProjectTemplate.empty, ProjectTemplate.rust],
   isOffline: true,
   runner: RustProgramRunner(),
+  codeAnalyzer: RustCodeAnalyzer(
+    transport:
+        Platform.isAndroid ||
+            Platform.isIOS ||
+            defaultTargetPlatform == TargetPlatform.ohos
+        ? NativeMiriAnalysisTransport()
+        : null,
+  ),
+  toolsTabBuilder: (store, onOpenTerminal) =>
+      RustToolsTab(store: store, onOpenTerminal: onOpenTerminal),
   terminalCommandDelegate: rustTerminalCommandDelegate,
   contentRepositoryFactory: RustContentRepository.new,
   productKey: StudioProductCatalog.rustCoreKey,

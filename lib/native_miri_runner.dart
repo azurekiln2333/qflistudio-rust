@@ -21,6 +21,7 @@ class NativeMiriProgramRunner implements ProgramRunner {
     this.maxOutputBytes = 1024 * 1024,
     this.maxGuestMemoryBytes = 64 * 1024 * 1024,
     this.pollInterval = const Duration(milliseconds: 50),
+    this.onStdoutBytes,
   });
 
   final String sysrootPath;
@@ -31,6 +32,10 @@ class NativeMiriProgramRunner implements ProgramRunner {
   final int maxOutputBytes;
   final int maxGuestMemoryBytes;
   final Duration pollInterval;
+
+  /// Receives an owned copy of each native stdout byte chunk before line
+  /// decoding. Audit callers use this to preserve exact terminal newlines.
+  final void Function(List<int> bytes)? onStdoutBytes;
 
   static const int _maxNativeInput = 16 * 1024 * 1024;
 
@@ -223,6 +228,14 @@ class _MiriRunSession {
       ..maxOutputBytes = runner.maxOutputBytes
       ..maxGuestMemoryBytes = runner.maxGuestMemoryBytes;
     final backend = runner.backendPath;
+    final createWithProject = bindings.createWithProject;
+    if (createWithProject != null) {
+      return createWithProject(
+        config,
+        backend?.toNativeUtf8(allocator: arena) ?? nullptr,
+        projectPath.toNativeUtf8(allocator: arena),
+      );
+    }
     if (backend == null) return bindings.create(config);
     final createWithBackend = bindings.createWithBackend;
     if (createWithBackend == null) {
@@ -255,7 +268,9 @@ class _MiriRunSession {
           }
           // Output may grow between the length query and copy. Only the
           // requested prefix was copied; the next poll collects the remainder.
-          channel.add(buffer.asTypedList(length).sublist(channel.offset));
+          final bytes = buffer.asTypedList(length).sublist(channel.offset);
+          if (index == 0) runner.onStdoutBytes?.call(List<int>.of(bytes));
+          channel.add(bytes);
           channel.offset = length;
         } finally {
           calloc.free(buffer);
@@ -361,6 +376,19 @@ typedef _CreateWithBackendNative =
     Pointer<_NativeSession> Function(Pointer<_NativeConfig>, Pointer<Utf8>);
 typedef _CreateWithBackendDart =
     Pointer<_NativeSession> Function(Pointer<_NativeConfig>, Pointer<Utf8>);
+
+typedef _CreateWithProjectNative =
+    Pointer<_NativeSession> Function(
+      Pointer<_NativeConfig>,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+    );
+typedef _CreateWithProjectDart =
+    Pointer<_NativeSession> Function(
+      Pointer<_NativeConfig>,
+      Pointer<Utf8>,
+      Pointer<Utf8>,
+    );
 typedef _RunNative = Int32 Function(Pointer<_NativeSession>);
 typedef _RunDart = int Function(Pointer<_NativeSession>);
 typedef _CancelNative = Void Function(Pointer<_NativeSession>);
@@ -389,6 +417,12 @@ class _MiriBindings {
                 'qfli_miri_create_with_backend',
               )
         : null;
+    createWithProject = library.providesSymbol('qfli_miri_create_with_project')
+        ? library
+              .lookupFunction<_CreateWithProjectNative, _CreateWithProjectDart>(
+                'qfli_miri_create_with_project',
+              )
+        : null;
     cancel = library.lookupFunction<_CancelNative, _CancelDart>(
       'qfli_miri_cancel',
     );
@@ -406,6 +440,7 @@ class _MiriBindings {
   late final _VersionDart abiVersion;
   late final _CreateDart create;
   late final _CreateWithBackendDart? createWithBackend;
+  late final _CreateWithProjectDart? createWithProject;
   late final _CancelDart cancel;
   late final _CopyDart copyOutput;
   late final _ResultDart result;

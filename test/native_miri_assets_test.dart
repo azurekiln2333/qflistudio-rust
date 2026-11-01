@@ -10,6 +10,10 @@ const _contentId =
     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const _assetHash =
     'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const _otherContentId =
+    'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+const _otherAssetHash =
+    'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +36,8 @@ void main() {
     String libraryName = 'qfli_miri.dll',
     String? backend,
     int schemaVersion = 2,
+    String contentId = _contentId,
+    String assetHash = _assetHash,
   }) => {
     'schemaVersion': schemaVersion,
     'platform': platform,
@@ -40,7 +46,7 @@ void main() {
     'rustCommit': '48a229ceaefd4985c50990b14116b6d856af0985',
     'nativeHost': nativeHost,
     'guestTarget': 'x86_64-unknown-linux-gnu',
-    'id': _contentId,
+    'id': contentId,
     'libraryName': libraryName,
     'nativeLibraries': [
       {'role': 'adapter', 'path': libraryName},
@@ -49,8 +55,8 @@ void main() {
     'files': [
       {
         'path': 'sysroot/lib/rustlib/x86_64-unknown-linux-gnu/lib/libstd.rlib',
-        'asset': '$_assetHash.bin',
-        'sha256': _assetHash,
+        'asset': '$assetHash.bin',
+        'sha256': assetHash,
         'size': 3,
       },
     ],
@@ -62,9 +68,16 @@ void main() {
     file.writeAsBytesSync([1]);
   }
 
-  void putManifest(Map<String, Object?> value, NativeMiriTarget target) {
-    bundle.assets[target.manifestAsset] = utf8.encode(jsonEncode(value));
-    bundle.assets['assets/miri/$_assetHash.bin'] = [1, 2, 3];
+  void putManifest(
+    Map<String, Object?> value,
+    NativeMiriTarget target, {
+    bool legacy = false,
+    List<int> bytes = const [1, 2, 3],
+  }) {
+    bundle.assets[legacy ? 'assets/miri/manifest.json' : target.manifestAsset] =
+        utf8.encode(jsonEncode(value));
+    final entry = (value['files'] as List).single as Map;
+    bundle.assets['assets/miri/${entry['asset']}'] = bytes;
   }
 
   NativeMiriAssets assets({Future<String?> Function()? nativeDirectory}) =>
@@ -75,6 +88,8 @@ void main() {
       );
 
   const windows = NativeMiriTarget(platform: 'windows', architecture: 'x64');
+  const ohosArm64 = NativeMiriTarget(platform: 'ohos', architecture: 'arm64');
+  const ohosX64 = NativeMiriTarget(platform: 'ohos', architecture: 'x64');
 
   test(
     'extracts guest data and keeps executable paths in the installation',
@@ -121,8 +136,215 @@ void main() {
     expect(runtime.libraryPath, 'libqfli_miri.so');
     expect(runtime.backendPath, isNull);
     expect(Directory(runtime.sysrootPath).existsSync(), isTrue);
-    expect(bundle.loads['assets/miri/manifest.json'], 1);
+    expect(bundle.loads['assets/miri/manifest.ohos-x64.json'], 1);
+    expect(bundle.loads['assets/miri/manifest.json'], isNull);
   });
+
+  test(
+    'OHOS architecture manifests coexist without replacing either runtime',
+    () async {
+      putManifest(
+        manifest(schemaVersion: 1, nativeHost: 'aarch64-unknown-linux-ohos'),
+        ohosArm64,
+      );
+      putManifest(
+        manifest(
+          schemaVersion: 1,
+          nativeHost: 'x86_64-unknown-linux-ohos',
+          contentId: _otherContentId,
+          assetHash: _otherAssetHash,
+        ),
+        ohosX64,
+        bytes: [4, 5, 6],
+      );
+      bundle.assets['assets/miri/manifest.json'] = utf8.encode(
+        '{invalid legacy',
+      );
+      final preparer = assets();
+      final arm64 = await preparer.prepare(target: ohosArm64);
+      final x64 = await preparer.prepare(target: ohosX64);
+      expect(arm64.nativeHost, 'aarch64-unknown-linux-ohos');
+      expect(x64.nativeHost, 'x86_64-unknown-linux-ohos');
+      expect(arm64.sysrootPath, isNot(x64.sysrootPath));
+      for (final (runtime, bytes) in [
+        (arm64, [1, 2, 3]),
+        (x64, [4, 5, 6]),
+      ]) {
+        expect(runtime.libraryPath, 'libqfli_miri.so');
+        expect(runtime.backendPath, isNull);
+        expect(
+          await File(
+            p.join(
+              runtime.sysrootPath,
+              'lib/rustlib/x86_64-unknown-linux-gnu/lib/libstd.rlib',
+            ),
+          ).readAsBytes(),
+          bytes,
+        );
+      }
+      expect(await preparer.prepare(target: ohosArm64), same(arm64));
+      expect(bundle.loads[ohosArm64.manifestAsset], 1);
+      expect(bundle.loads[ohosX64.manifestAsset], 1);
+      expect(bundle.loads['assets/miri/manifest.json'], isNull);
+      expect(bundle.loads['AssetManifest.bin'], isNull);
+    },
+  );
+
+  for (final (target, host) in [
+    (ohosArm64, 'aarch64-unknown-linux-ohos'),
+    (ohosX64, 'x86_64-unknown-linux-ohos'),
+  ]) {
+    test(
+      '${target.key} uses legacy when its architecture manifest is absent',
+      () async {
+        putManifest(
+          manifest(schemaVersion: 1, nativeHost: host),
+          target,
+          legacy: true,
+        );
+        final runtime = await assets().prepare(target: target);
+        expect(runtime.nativeHost, host);
+        expect(bundle.loads[target.manifestAsset], 1);
+        expect(bundle.loads['AssetManifest.bin'], 1);
+        expect(bundle.loads['assets/miri/manifest.json'], 1);
+      },
+    );
+  }
+
+  test('rejects a legacy OHOS manifest for the other architecture', () async {
+    putManifest(
+      manifest(schemaVersion: 1, nativeHost: 'aarch64-unknown-linux-ohos'),
+      ohosX64,
+      legacy: true,
+    );
+    await expectLater(assets().prepare(target: ohosX64), throwsFormatException);
+    expect(
+      Directory(p.join(storage.path, 'rust_runtime')).existsSync(),
+      isFalse,
+    );
+  });
+
+  for (final (label, value) in <(String, Object?)>[
+    (
+      'wrong architecture',
+      {'schemaVersion': 1, 'nativeHost': 'aarch64-unknown-linux-ohos'},
+    ),
+    (
+      'wrong schema',
+      {
+        'schemaVersion': 2,
+        'platform': 'ohos',
+        'architecture': 'x64',
+        'nativeHost': 'x86_64-unknown-linux-ohos',
+      },
+    ),
+    ('malformed JSON', '{invalid'),
+    ('empty JSON', ''),
+    ('invalid UTF-8', [0xff]),
+  ]) {
+    test('OHOS does not hide $label behind the legacy manifest', () async {
+      putManifest(
+        manifest(schemaVersion: 1, nativeHost: 'x86_64-unknown-linux-ohos'),
+        ohosX64,
+        legacy: true,
+      );
+      bundle.assets[ohosX64.manifestAsset] = value is Map<String, Object?>
+          ? utf8.encode(jsonEncode(manifest()..addAll(value)))
+          : value is String
+          ? utf8.encode(value)
+          : value as List<int>;
+      await expectLater(
+        assets().prepare(target: ohosX64),
+        throwsFormatException,
+      );
+      expect(bundle.loads['assets/miri/manifest.json'], isNull);
+      expect(
+        Directory(p.join(storage.path, 'rust_runtime')).existsSync(),
+        isFalse,
+      );
+    });
+  }
+
+  test(
+    'OHOS retries an advertised manifest read failure without fallback',
+    () async {
+      putManifest(
+        manifest(schemaVersion: 1, nativeHost: 'x86_64-unknown-linux-ohos'),
+        ohosX64,
+      );
+      putManifest(
+        manifest(schemaVersion: 1, nativeHost: 'aarch64-unknown-linux-ohos'),
+        ohosX64,
+        legacy: true,
+      );
+      bundle.failures[ohosX64.manifestAsset] = StateError('asset read failed');
+      final preparer = assets();
+      await expectLater(preparer.prepare(target: ohosX64), throwsStateError);
+      expect(bundle.loads['assets/miri/manifest.json'], isNull);
+      bundle.failures.remove(ohosX64.manifestAsset);
+      expect(
+        (await preparer.prepare(target: ohosX64)).nativeHost,
+        'x86_64-unknown-linux-ohos',
+      );
+      expect(bundle.loads[ohosX64.manifestAsset], 2);
+    },
+  );
+
+  test(
+    'OHOS cannot infer absence when package inventory is unavailable',
+    () async {
+      putManifest(
+        manifest(schemaVersion: 1, nativeHost: 'x86_64-unknown-linux-ohos'),
+        ohosX64,
+        legacy: true,
+      );
+      bundle.failures['AssetManifest.bin'] = StateError(
+        'inventory read failed',
+      );
+      await expectLater(assets().prepare(target: ohosX64), throwsStateError);
+      expect(bundle.loads['assets/miri/manifest.json'], isNull);
+    },
+  );
+
+  test(
+    'OHOS retries missing data while preserving another prepared architecture',
+    () async {
+      putManifest(
+        manifest(schemaVersion: 1, nativeHost: 'aarch64-unknown-linux-ohos'),
+        ohosArm64,
+      );
+      putManifest(
+        manifest(
+          schemaVersion: 1,
+          nativeHost: 'x86_64-unknown-linux-ohos',
+          contentId: _otherContentId,
+          assetHash: _otherAssetHash,
+        ),
+        ohosX64,
+        bytes: [4, 5, 6],
+      );
+      bundle.assets.remove('assets/miri/$_otherAssetHash.bin');
+      final preparer = assets();
+      final arm64 = await preparer.prepare(target: ohosArm64);
+      await expectLater(preparer.prepare(target: ohosX64), throwsStateError);
+      bundle.assets['assets/miri/$_otherAssetHash.bin'] = [4, 5, 6];
+      final x64 = await preparer.prepare(target: ohosX64);
+      expect(x64.nativeHost, 'x86_64-unknown-linux-ohos');
+      expect(await preparer.prepare(target: ohosArm64), same(arm64));
+      expect(bundle.loads[ohosArm64.manifestAsset], 1);
+      expect(bundle.loads[ohosX64.manifestAsset], 2);
+      expect(bundle.loads['assets/miri/$_assetHash.bin'], 1);
+      expect(
+        await File(
+          p.join(
+            arm64.sysrootPath,
+            'lib/rustlib/x86_64-unknown-linux-gnu/lib/libstd.rlib',
+          ),
+        ).readAsBytes(),
+        [1, 2, 3],
+      );
+    },
+  );
 
   for (final (platform, architecture, host, library, backend) in [
     (
@@ -327,10 +549,21 @@ void main() {
 class _MemoryBundle extends CachingAssetBundle {
   final Map<String, List<int>> assets = {};
   final Map<String, int> loads = {};
+  final Map<String, Object> failures = {};
 
   @override
   Future<ByteData> load(String key) async {
     loads.update(key, (count) => count + 1, ifAbsent: () => 1);
+    final failure = failures[key];
+    if (failure != null) throw failure;
+    if (key == 'AssetManifest.bin') {
+      return const StandardMessageCodec().encodeMessage({
+        for (final asset in assets.keys)
+          asset: [
+            {'asset': asset},
+          ],
+      })!;
+    }
     final bytes = assets[key];
     if (bytes == null) throw StateError('Missing fixture asset $key');
     return ByteData.sublistView(Uint8List.fromList(bytes));
