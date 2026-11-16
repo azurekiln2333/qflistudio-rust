@@ -208,3 +208,42 @@ Bound compiler and adapter provenance. Added complete ABI and archive checks. Pr
 - Keep task in progress. Add explicit analysis mirror-root handling and verified non-OHOS loader support.
 - Refreeze current core metadata and exact source identities before requesting fresh bounded runtime grants.
 - Build patched compiler and adapters. Run actual ABI and OHOS catalog acceptance before adding topics.
+
+
+## Session 6: GPL alignment and mobile native CI validation
+<!-- trellis-session: v=2 fp=3fb285a92f58118f -->
+
+**Date**: 2026-11-17
+**Task**: GPL alignment and mobile native CI validation
+**Branch**: `ci/native-runtime`
+
+### Summary
+
+Aligned GPLv3 with qflistudio and pushed mobile native builds. Android compiler and backend succeeded; fixed LLVM aliases and missing host dependency cache. Corrected run is queued; iOS and complete runtime artifact validation remain open.
+
+### Main Changes
+
+- Preserved active native runs and queued subsequent updates.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1cebc79` | docs(license): add GPL-3.0 license aligned with qflistudio |
+| `341ffef` | ci(native): cross-build Android OHOS and iOS runtimes |
+| `76dd57f` | fix(native): preserve LLVM executable aliases |
+| `3a57b37` | fix(ci): prefetch host dependencies for native adapters |
+| `9fa6a09` | docs(ci): clarify manual workflow prerequisites |
+| `76289a0` | ci(native): queue updates without cancelling active builds |
+
+### Testing
+
+- [OK] 103 producer/support/consumer checks and 10 helper checks passed; workflow and Chinese lint passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Inspect iOS in run 43939926708, then jobs and runtime artifacts in corrected run 43946596992.
