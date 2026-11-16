@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 
@@ -110,21 +110,62 @@ def compiler_patch_hunks(patch):
     return files
 
 
+def source_link_target(root, path):
+    """Validate relative link chains component by component without opening referents."""
+    def resolve(target, parts, active):
+        if Path(target).is_absolute() or PureWindowsPath(target).anchor:
+            raise ValueError(f"Compiler source link must be relative: {path}")
+        # Tar links use POSIX separators even when extracted on Windows. Resolve
+        # each link explicitly instead of asking Windows to follow those bytes.
+        for part in target.replace("\\", "/").split("/"):
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not parts:
+                    raise ValueError(f"Compiler source link escapes the source tree: {path}")
+                parts = parts[:-1]
+                continue
+            candidate = root.joinpath(*parts, part)
+            if getattr(candidate, "is_junction", lambda: False)():
+                raise ValueError(f"Compiler source contains a junction: {candidate}")
+            if candidate.is_symlink():
+                if candidate in active:
+                    raise ValueError(f"Compiler source link cannot be resolved safely: {path}")
+                parts = resolve(os.readlink(candidate), parts, active | {candidate})
+            else:
+                parts = [*parts, part]
+        return parts
+
+    target = os.readlink(path)
+    resolve(target, list(path.parent.relative_to(root).parts), {path})
+    return target
+
+
 def tree_identity(root):
-    """Hash copied regular inputs in stable path order, excluding Git metadata."""
-    root = Path(root)
+    """Hash source files and confined relative links without following linked trees."""
+    root = Path(root).resolve()
     manifest = hashlib.sha256()
     count = 0
     for folder, directories, names in os.walk(root, followlinks=False):
         directories[:] = sorted(name for name in directories if name != ".git")
-        for name in directories + names:
+        for name in sorted(directories + names):
             path = Path(folder) / name
-            if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
-                raise ValueError(f"Compiler source contains a link: {path}")
+            if getattr(path, "is_junction", lambda: False)():
+                raise ValueError(f"Compiler source contains a junction: {path}")
+            if not path.is_symlink():
+                continue
+            target = source_link_target(root, path)
+            relative = path.relative_to(root).as_posix()
+            manifest.update(json.dumps([relative, "symlink", target],
+                                       ensure_ascii=True, separators=(",", ":")).encode() + b"\n")
+            count += 1
+        directories[:] = [name for name in directories if not (Path(folder) / name).is_symlink()]
         for name in sorted(names):
             if name in (".git", ".qfli-compiler-source.json"):
                 continue
             path = Path(folder) / name
+            if path.is_symlink():
+                continue
             if not path.is_file():
                 raise ValueError(f"Compiler source contains a non-file: {path}")
             relative = path.relative_to(root).as_posix()

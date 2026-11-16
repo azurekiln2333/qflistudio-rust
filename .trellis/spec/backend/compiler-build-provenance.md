@@ -26,6 +26,10 @@ Metadata discovery and backend loading remain separate trusted-artifact boundari
 `scripts/build_rustc_host.py` copies complete pinned source into an owned tree.
 It applies exact patch hunks without fuzz and preserves input source.
 It records original and patched tree identities and every patched-file hash.
+Official source archives contain LLVM test symlinks. Fingerprint their relative
+targets without following them, and preserve them when copying the owned tree.
+Reject absolute links, source-escaping targets, cycles and Windows junctions.
+Do not discard upstream tests or dereference links to bypass source identity.
 No generated output or cache may overwrite a protected compiler input.
 Use `ensure_disjoint_build_root` before writing wrappers or staging source.
 The guard rejects equal paths and ancestry in both directions.

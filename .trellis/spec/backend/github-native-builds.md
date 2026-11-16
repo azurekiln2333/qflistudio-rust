@@ -26,6 +26,8 @@ commands retain the contracts in `compiler-build-provenance.md`.
 - Fresh runners must prepare locked adapter dependencies before offline builds.
 - Set `PYTHONDONTWRITEBYTECODE=1` for bootstrap so Python imports cannot mutate
   the compiler source tree whose complete fingerprint is verified after build.
+- Preserve and fingerprint safe in-tree source symlinks. The official source
+  archive contains LLVM CUDA test links on both Linux and Windows.
 - Keep large build roots in runner temporary storage. Upload no compiler cache.
 - Runtime artifacts are named `native-runtime-linux-x64`,
   `native-runtime-windows-x64`, and `native-runtime-macos-arm64`.

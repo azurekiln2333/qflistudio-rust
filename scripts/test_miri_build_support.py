@@ -8,6 +8,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -474,6 +475,84 @@ class DisjointBuildRootTests(NoProcessTests):
 
     def test_resolved_input_link_cannot_hide_input_inside_output(self):
         self.assert_overlap_rejected(self.protected, self.local_link())
+
+
+class SourceTreeIdentityTests(NoProcessTests):
+    def setUp(self):
+        super().setUp()
+        temporary = tempfile.TemporaryDirectory(prefix="source-tree-links-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.source = self.root / "source"
+        self.source.mkdir()
+
+    def link(self, path, target, directory=False):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.symlink_to(target, target_is_directory=directory)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest(f"Local symbolic links unavailable: {error}")
+        return path
+
+    def test_upstream_cuda_fixture_link_survives_copy_and_is_hashed_as_link(self):
+        fixture = self.source / "src/llvm-project/clang/test/Driver/Inputs/CUDA-symlinks/usr"
+        binary = fixture / "lib/cuda/bin/ptxas"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"fixture ptxas")
+        link = self.link(fixture / "bin/ptxas", "../lib/cuda/bin/ptxas")
+        before = support.tree_identity(self.source)
+        self.assertEqual(before["fileCount"], 2)
+        copied = self.root / "copied"
+        shutil.copytree(self.source, copied, symlinks=True)
+        self.assertEqual(support.tree_identity(copied), before)
+        self.assertTrue((copied / link.relative_to(self.source)).is_symlink())
+        link.unlink()
+        self.link(link, "../lib/cuda/bin/./ptxas")
+        self.assertNotEqual(support.tree_identity(self.source), before)
+
+    def test_linked_directory_is_not_walked_or_hashed_twice(self):
+        directory = self.source / "actual"
+        directory.mkdir()
+        (directory / "data").write_bytes(b"fixture")
+        self.link(self.source / "alias", "actual", directory=True)
+        self.assertEqual(support.tree_identity(self.source)["fileCount"], 2)
+
+    def test_dangling_relative_test_link_is_recorded_without_dereferencing(self):
+        self.link(self.source / "dangling", "missing/target")
+        self.assertEqual(support.tree_identity(self.source)["fileCount"], 1)
+
+    def test_posix_directory_link_chain_is_valid_on_windows_too(self):
+        actual = self.source / "usr/lib/cuda"
+        actual.mkdir(parents=True)
+        (actual / "ptxas").write_bytes(b"fixture")
+        self.link(self.source / "usr/alias", "lib/cuda", directory=True)
+        self.link(self.source / "ptxas", "usr/alias/ptxas")
+        self.assertEqual(support.tree_identity(self.source)["fileCount"], 3)
+
+    def test_external_and_absolute_links_are_rejected(self):
+        outside = self.root / "outside"
+        outside.write_bytes(b"outside input")
+        link = self.link(self.source / "escape", "../outside")
+        with self.assertRaisesRegex(ValueError, "escapes the source tree"):
+            support.tree_identity(self.source)
+        link.unlink()
+        self.link(link, str(outside.resolve()))
+        with self.assertRaisesRegex(ValueError, "must be relative"):
+            support.tree_identity(self.source)
+
+    def test_link_cycle_is_rejected(self):
+        self.link(self.source / "first", "second")
+        self.link(self.source / "second", "first")
+        with self.assertRaisesRegex(ValueError, "cannot be resolved safely"):
+            support.tree_identity(self.source)
+
+    def test_link_retargeting_through_another_link_cannot_escape(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        self.link(self.source / "first", "second/data")
+        self.link(self.source / "second", "../outside", directory=True)
+        with self.assertRaisesRegex(ValueError, "escapes the source tree|cannot be resolved safely"):
+            support.tree_identity(self.source)
 
 
 class CompilerPatchParserTests(NoProcessTests):

@@ -89,6 +89,38 @@ class BootstrapInputTests(unittest.TestCase):
         self.assertEqual(config["build"]["description"], "")
 
 
+class CompilerSourceCopyTests(unittest.TestCase):
+    def test_source_patch_preserves_relative_links_and_input_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            compiler = source / "compiler"
+            compiler.mkdir(parents=True)
+            (compiler / "fixture.rs").write_bytes(b"before\n")
+            (source / "git-commit-hash").write_text(bootstrap.RUST_COMMIT + "\n")
+            link = source / "fixture-link"
+            try:
+                link.symlink_to("compiler/fixture.rs")
+            except (OSError, NotImplementedError) as error:
+                self.skipTest(f"Local symbolic links unavailable: {error}")
+            build = root / "build"
+            build.mkdir()
+            patch_file = root / "fixture.patch"
+            patch_file.write_text("diff --git a/fixture.rs b/fixture.rs\n"
+                                  "@@ -1 +1 @@\n-before\n+after\n")
+            original = bootstrap.tree_identity(source)
+            with patch.object(bootstrap, "source_revision"), \
+                    patch.object(bootstrap, "compiler_boundary_patch", return_value=patch_file):
+                copied, provenance = bootstrap.prepare_compiler_source(source, build)
+            self.assertEqual(bootstrap.tree_identity(source), original)
+            self.assertEqual(provenance["inputTree"], original)
+            self.assertEqual(provenance["patchedTree"], bootstrap.tree_identity(copied))
+            self.assertTrue((copied / "fixture-link").is_symlink())
+            self.assertEqual(os.readlink(copied / "fixture-link"), os.readlink(link))
+            self.assertEqual((copied / "compiler/fixture.rs").read_bytes(), b"after\n")
+            self.assertEqual((compiler / "fixture.rs").read_bytes(), b"before\n")
+
+
 class NativeToolConfigurationTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

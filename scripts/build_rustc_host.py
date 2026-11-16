@@ -319,7 +319,7 @@ def prepare_compiler_source(original, build_root):
         return destination, provenance
     with tempfile.TemporaryDirectory(prefix="compiler-source.", dir=build_root) as temporary:
         staged = Path(temporary) / "source"
-        shutil.copytree(original, staged, ignore=shutil.ignore_patterns(".git"))
+        shutil.copytree(original, staged, symlinks=True, ignore=shutil.ignore_patterns(".git"))
         if tree_identity(staged) != inputs or tree_identity(original) != inputs:
             raise ValueError("Compiler source changed while preparing its owned copy")
         changes = []
