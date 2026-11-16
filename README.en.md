@@ -199,3 +199,11 @@ Mobile execution results remain pending.
 See [native/README.md](native/README.md).
 
 It records the per-platform builds, packaging and the ABI contract.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0.
+
+See [LICENSE](LICENSE) for the complete terms.
+
+Components with separate license declarations retain those declarations.

@@ -199,3 +199,11 @@ OHOS 物理设备需要匹配的 Rust 签名配置。
 见 [native/README.md](native/README.md)。
 
 那里记录各平台构建、打包与 ABI 契约。
+
+## 许可证
+
+本项目采用 GNU GPL v3.0。
+
+完整条款见 [LICENSE](LICENSE)。
+
+单独声明许可证的组件保留原声明。

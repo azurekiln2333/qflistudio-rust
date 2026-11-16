@@ -199,3 +199,11 @@ OHOS 實體裝置需要相符的 Rust 簽章設定。
 見 [native/README.md](native/README.md)。
 
 那裡記錄各平台建置、封裝與 ABI 契約。
+
+## 授權條款
+
+本專案採用 GNU GPL v3.0。
+
+完整條款見 [LICENSE](LICENSE)。
+
+個別聲明授權條款的元件保留原聲明。
