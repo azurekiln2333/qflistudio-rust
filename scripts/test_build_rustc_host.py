@@ -298,6 +298,44 @@ class NativeToolConfigurationTests(unittest.TestCase):
         self.assertIn(str(self.local["ld_lld"].resolve()), wrapper)
         self.assertEqual(tools["ar"], self.local["ar"].resolve())
 
+    def test_llvm_multicall_aliases_keep_the_selected_executable_name(self):
+        for alias_name, target_name in (("ld.lld", "lld"), ("clang++", "clang"),
+                                        ("llvm-ranlib", "llvm-ar")):
+            with self.subTest(alias=alias_name):
+                directory = self.root / "aliases" / alias_name
+                directory.mkdir(parents=True)
+                target = directory / target_name
+                target.write_bytes(b"fixture multicall executable")
+                alias = directory / alias_name
+                try:
+                    alias.symlink_to(target_name)
+                except (OSError, NotImplementedError) as error:
+                    self.skipTest(f"Local symbolic links unavailable: {error}")
+                selected = bootstrap.executable(alias)
+                self.assertEqual(selected, alias.absolute())
+                self.assertEqual(selected.name, alias_name)
+                self.assertEqual(selected.resolve(), target.resolve())
+
+    def test_linux_linker_wrapper_preserves_ld_lld_symlink_flavor(self):
+        lld = self.root / "local tools/lld"
+        lld.write_bytes(b"fixture lld multicall executable")
+        selected = self.local["ld_lld"]
+        selected.unlink()
+        try:
+            selected.symlink_to("lld")
+        except (OSError, NotImplementedError) as error:
+            self.skipTest(f"Local symbolic links unavailable: {error}")
+        args = self.args("x86_64-unknown-linux-gnu")
+        tools = bootstrap.native_tools(args, args.native_host)
+        self.assertEqual(tools["linkerExecutable"], selected.absolute())
+        self.assertIn("-fuse-ld=" + str(selected.absolute()), tools["linker"].read_text())
+
+    def test_executable_rejects_missing_or_directory_referents(self):
+        with self.assertRaisesRegex(ValueError, "Missing executable"):
+            bootstrap.executable(self.root / "missing-tool")
+        with self.assertRaisesRegex(ValueError, "Missing executable"):
+            bootstrap.executable(self.root / "local tools")
+
     def test_linux_aarch64_cross_config_binds_sysroot(self):
         args = self.args("aarch64-unknown-linux-gnu")
         args.linux_sysroot = self.root / "arm64 sysroot"

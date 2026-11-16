@@ -35,6 +35,17 @@ Use `ensure_disjoint_build_root` before writing wrappers or staging source.
 The guard rejects equal paths and ancestry in both directions.
 Resolve aliases before comparison. Windows comparisons follow Windows path semantics.
 
+LLVM tools can select their operation from `argv[0]`. The executable helper
+must validate that the resolved target is a regular file, then return the
+absolute selected path without resolving its final symlink. Preserve names
+such as `ld.lld`, `clang++` and `llvm-ranlib` in wrappers, linker flags and build
+records. Replacing `ld.lld` with its `lld` referent loses the ELF linker mode.
+This execution-path rule does not weaken output/input overlap checks: protect
+both the selected tool directory and its resolved referent directory before
+writing generated wrappers. Missing files and directory targets must fail.
+Regression tests cover alias retention, `-fuse-ld` wrapper arguments and invalid
+referents. Validate actual target compilation separately on its build runner.
+
 A successful compiler record uses schema 2 and status `built`.
 It binds the native host, source commit, boundary kind, patch hash and all selected
 compiler-private metadata and runtime library hashes.

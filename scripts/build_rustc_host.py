@@ -34,8 +34,10 @@ RUST_STD_COMPILER_PREFIX_CRATES = frozenset({
 
 
 def executable(path):
-    path = Path(path).resolve()
-    if not path.is_file():
+    path = Path(path).absolute()
+    # LLVM multicall binaries select their mode from argv[0]. Keep aliases such
+    # as ld.lld, clang++ and llvm-ranlib while validating the actual file.
+    if not path.resolve().is_file():
         raise ValueError(f"Missing executable: {path}")
     return path
 
