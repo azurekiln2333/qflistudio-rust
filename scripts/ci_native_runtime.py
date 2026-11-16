@@ -58,13 +58,13 @@ class Runner:
         print(f"::group::{name}", flush=True)
         with (self.logs / f"{name}.log").open("w", encoding="utf-8", buffering=1) as log:
             log.write(json.dumps(command) + "\n")
-            process = subprocess.Popen(command, cwd=cwd or ROOT, env=env or self.env,
-                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                       text=True, encoding="utf-8", errors="replace", bufsize=1)
-            for line in process.stdout:
-                log.write(line)
-                print(line, end="", flush=True)
-            code = process.wait()
+            with subprocess.Popen(command, cwd=cwd or ROOT, env=env or self.env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                  text=True, encoding="utf-8", errors="replace", bufsize=1) as process:
+                for line in process.stdout:
+                    log.write(line)
+                    print(line, end="", flush=True)
+                code = process.wait()
         print("::endgroup::", flush=True)
         if code:
             raise subprocess.CalledProcessError(code, command)
@@ -145,13 +145,16 @@ def unpack_guest(archive, destination):
     return guest
 
 
-def prepare_adapter_cache(runner, toolchain, source, host):
+def prepare_adapter_cache(runner, toolchain, source):
     stage = runner.work / "dependency-stage"
     shutil.copytree(source, stage / "miri")
     shutil.copytree(ROOT / "native/miri_adapter", stage / "adapter")
     cargo = toolchain / "bin" / ("cargo.exe" if os.name == "nt" else "cargo")
+    # The adapter's -Zdual-proc-macros build also resolves build-host crates.
+    # A mobile-only fetch omits Linux host dependencies such as measureme's
+    # memmap2. Fetch every locked target before the builder switches offline.
     runner.run("adapter-fetch", [cargo, "fetch", "--manifest-path", stage / "adapter/Cargo.toml",
-                                 "--locked", "--target", host])
+                                 "--locked"])
 
 
 def collect_package(package_root, host, records, output, commit):
@@ -232,7 +235,7 @@ def build_runtime(runner, host, build_host, guest_archive):
     compiler_record = compiler_root / "compiler-build.json"
     compiler = json.loads(compiler_record.read_text(encoding="utf-8"))
     miri = source / "src/tools/miri"
-    prepare_adapter_cache(runner, toolchain, miri, host)
+    prepare_adapter_cache(runner, toolchain, miri)
     adapter_root = runner.work / "adapter"
     environment = dict(runner.env, QFLI_COMPILER_SYSROOT=compiler["compilerSysroot"],
                        QFLI_RUNTIME_SYSROOT=compiler["runtimeSysroot"],

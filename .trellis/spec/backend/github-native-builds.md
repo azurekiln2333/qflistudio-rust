@@ -28,7 +28,11 @@ under `-GuestSysroot`. Linux uses local paths and native LLVM executables.
   `miri_build_support.py`. Do not weaken pinned identities for a green CI job.
 - Use a minimal pinned bootstrap toolchain without rustc-dev. Guest preparation
   uses a separate toolchain with rustc-dev and rust-src.
-- Fresh runners must prepare locked adapter dependencies before offline builds.
+- Fresh runners must prepare the complete locked adapter dependency graph before
+  offline builds. Run `cargo fetch --locked --manifest-path <staged-adapter>`
+  without `--target`. The `-Zdual-proc-macros` build also uses build-host crates;
+  a mobile-only fetch can omit Linux dependencies such as `measureme`'s
+  `memmap2`. Keep the same Cargo cache for prefetch and the offline adapter build.
 - Set `PYTHONDONTWRITEBYTECODE=1` for bootstrap so Python imports cannot mutate
   the compiler source tree whose complete fingerprint is verified after build.
 - Preserve and fingerprint safe in-tree source symlinks. The official source
@@ -71,7 +75,10 @@ under `-GuestSysroot`. Linux uses local paths and native LLVM executables.
 
 Test build-host/target separation, target std installation, SDK selection, archive
 path confinement, manifest coverage, checksum publication, and failures before
-runtime archive creation. Validate workflow syntax and execute the workflow
+runtime archive creation. A local-registry regression must demonstrate that a
+target-only fetch leaves host metadata unavailable offline, then the complete
+locked fetch makes that same metadata available from the shared cache. Validate
+workflow syntax and execute the workflow
 on actual requested hosts. Record run URL, commit and per-job conclusions.
 
 ## 7. Wrong and correct

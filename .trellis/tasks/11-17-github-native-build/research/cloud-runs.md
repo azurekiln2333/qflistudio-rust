@@ -41,8 +41,15 @@ dropping source files or weakening compiler patch provenance.
   `ld.lld` alias changed the invocation name to the generic `lld` driver.
   The producer now validates the referent while preserving the selected alias.
   A separate review passed 103 producer/support/consumer tests.
-- Android arm64/x64 and iOS arm64 remain in progress. The current artifact list
-  contains shared guest data and diagnostic logs, not a complete native runtime.
+- Android arm64 and x64 both completed the patched compiler and embedded
+  Cranelift backend, emitted compiler-build.json and passed provenance checks.
+  Their adapters then failed before compilation: the offline build lacked
+  `memmap2 v0.2.3` despite a successful target-filtered cache fetch.
+  `-Zdual-proc-macros` also needs the Linux host dependency graph. Fetching the
+  full locked graph fixes that cache gap while retaining offline adapter builds.
+  Ten helper checks passed, including a real Cargo/local-registry reproduction.
+- iOS arm64 remains in progress. The current artifact list contains shared
+  guest data and diagnostic logs, not a complete native runtime.
 
 ## Separate license change
 
