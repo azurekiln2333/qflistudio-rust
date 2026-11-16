@@ -51,6 +51,18 @@ dropping source files or weakening compiler patch provenance.
 - iOS arm64 remains in progress. The current artifact list contains shared
   guest data and diagnostic logs, not a complete native runtime.
 
+## Queued corrected run
+
+- Run: https://github.com/azurekiln2333/qflistudio-rust/actions/runs/43946596992
+- Commit: 76289a080335389ad3a283c7278fa548e5cd0ba3
+- Includes LLVM alias preservation (76dd57f), complete locked adapter dependency
+  prefetch (3a57b37), and manual-dispatch documentation (9fa6a09).
+- Per-ref concurrency now keeps the active run and queues the newest update.
+  GitHub confirmed this run pending while 43939926708 continued its iOS job.
+- All code changes are pushed. Runtime validation remains open; no complete
+  runtime artifact has been observed yet. Next step: inspect the active iOS
+  conclusion, then this corrected run's jobs and artifact inventory.
+
 ## Separate license change
 
 - Commit: 1cebc79 docs(license): add GPL-3.0 license aligned with qflistudio
