@@ -1,10 +1,14 @@
 # Implementation
 
-- [x] Extend the compiler producer for Windows GNU x64 and macOS arm64; test platform configuration and DLL artifact handling.
+- [x] Extend the desktop producer and fix upstream source-link handling (initial scope).
+- [x] Apply corrected target scope: Android/OHOS arm64+x64 and iOS arm64 device; optional macOS x64.
+- [x] Fix standard-library facade detection and reuse official build-host toolchains.
+- [x] Add pinned OHOS SDK acquisition and portable existing OHOS packager.
 - [x] Add a clean-runner CI helper and workflow for guest, compiler, adapter and package stages.
 - [x] Document artifacts, download/restore steps and local disk-use findings.
 - [x] Run relevant Python regressions, workflow validation and controlled Chinese lint.
-- [ ] Review the changes through a Trellis check agent.
+- [x] Review initial desktop/source-link changes through a Trellis check agent.
+- [x] Review corrected mobile workflow changes through a Trellis check agent.
 - [ ] Commit, push only to GitHub, observe actual Actions jobs, and fix reproducible failures.
 - [ ] Record real run results and artifact inventory. Keep failed or pending runtime evidence explicit.
 

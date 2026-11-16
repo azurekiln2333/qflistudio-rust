@@ -25,6 +25,12 @@ BOOTSTRAP_HOSTS = [host for host, (platform, _) in HOSTS.items()
                    if platform in ("linux", "ohos", "android", "ios", "macos")
                    or host == "x86_64-pc-windows-gnu"]
 LINUX_BUILD_HOSTS = ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu")
+# These exact crates are shipped by the pinned official rust-std component.
+# Their rustc_ prefix does not make them compiler-private metadata.
+RUST_STD_COMPILER_PREFIX_CRATES = frozenset({
+    "rustc_demangle", "rustc_literal_escaper", "rustc_std_workspace_alloc",
+    "rustc_std_workspace_core", "rustc_std_workspace_std",
+})
 
 
 def executable(path):
@@ -403,12 +409,18 @@ def require_bootstrap_inputs(toolchain, native_host, build_host):
             f"Build toolchain is missing the matching {native_host} rust-std bootstrap input; "
             "install the pinned target standard library into the build toolchain before bootstrap"
         )
-    private = Path(toolchain) / "lib/rustlib" / build_host / "lib"
-    if any(private.glob("*rustc_*.rmeta")) or any(private.glob("*rustc_*.rlib")):
-        raise ValueError(
-            "Bootstrap requires a clean compiler toolchain without rustc-dev private libraries; "
-            "use a separate minimal pinned toolchain so source-built metadata cannot conflict"
-        )
+    for host in {build_host, native_host}:
+        private = Path(toolchain) / "lib/rustlib" / host / "lib"
+        for pattern in ("*rustc_*.rmeta", "*rustc_*.rlib"):
+            for library in private.glob(pattern):
+                crate = library.stem.removeprefix("lib").split("-", 1)[0]
+                if crate in RUST_STD_COMPILER_PREFIX_CRATES:
+                    continue
+                raise ValueError(
+                    "Bootstrap requires a clean compiler toolchain without rustc-dev private libraries; "
+                    f"found {library.name} for {host}. Use a separate minimal pinned toolchain "
+                    "so source-built metadata cannot conflict"
+                )
 
 
 def build_embedded_backend(args, source, private, runtime, tools, environment):

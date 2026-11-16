@@ -87,7 +87,7 @@ case "$target" in
     fi
     set -- "$@" -L "native=$sdk/llvm/lib/$sdk_target" \
       -C "link-arg=--target=$sdk_target" -C "link-arg=--sysroot=$sdk/sysroot" \
-      -C "link-arg=-resource-dir=$sdk/llvm/lib/clang/15.0.4" -C 'link-arg=-Wl,-rpath,$ORIGIN'
+      -C "link-arg=-resource-dir=${QFLI_OHOS_RESOURCE_DIR:-$sdk/llvm/lib/clang/15.0.4}" -C 'link-arg=-Wl,-rpath,$ORIGIN'
     ;;
   aarch64-linux-android|x86_64-linux-android)
     : "${QFLI_ANDROID_NDK:?Set QFLI_ANDROID_NDK to the complete native-host NDK}"

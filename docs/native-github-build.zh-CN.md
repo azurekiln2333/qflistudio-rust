@@ -8,9 +8,14 @@ GitHub Actions 负责编译 native 运行库。
 
 | 平台 | 架构 | 原生库形式 |
 | --- | --- | --- |
-| Linux | x64 | `.so` 及配套依赖 |
-| Windows | x64 GNU | `.dll` 及配套依赖 |
-| macOS | arm64 | framework 及配套依赖 |
+| Android | arm64、x64 | `.so` 及配套依赖 |
+| OHOS | arm64、x64 | `.so` 及配套依赖 |
+| iOS 设备 | arm64 | framework 及配套依赖 |
+| macOS（手动可选） | x64 | framework 及配套依赖 |
+
+Linux 和 macOS 充当构建机器。
+构建机器使用官方预编译工具链。
+工作流不生成 Linux 或 Windows 运行库。
 
 这些产物供 Flutter 应用打包使用。
 它们不是可直接安装的应用。
@@ -38,9 +43,12 @@ GitHub Actions 负责编译 native 运行库。
 
 | 下载项 | 对应平台 |
 | --- | --- |
-| `native-runtime-linux-x64` | Linux x64 |
-| `native-runtime-windows-x64` | Windows x64 GNU |
-| `native-runtime-macos-arm64` | macOS arm64 |
+| `native-runtime-android-arm64` | Android arm64 |
+| `native-runtime-android-x64` | Android x64 |
+| `native-runtime-ohos-arm64` | OHOS arm64 |
+| `native-runtime-ohos-x64` | OHOS x64 |
+| `native-runtime-ios-arm64` | iOS arm64 设备 |
+| `native-runtime-macos-x64` | macOS x64（手动可选） |
 
 平台包和日志保留 14 天。
 每个下载项包含 `.tar.gz` 和校验文件。
@@ -49,7 +57,7 @@ GitHub 下载的 ZIP 文件包含这两个文件。
 在压缩包所在目录运行校验命令：
 
 ```sh
-sha256sum -c native-runtime-linux-x64.tar.gz.sha256
+sha256sum -c native-runtime-android-arm64.tar.gz.sha256
 ```
 
 macOS 可使用 `shasum -a 256`。
@@ -59,7 +67,7 @@ Windows 可使用 `Get-FileHash`。
 从仓库根目录解压目标平台包：
 
 ```sh
-tar -xzf <下载目录>/native-runtime-linux-x64.tar.gz
+tar -xzf <下载目录>/native-runtime-android-arm64.tar.gz
 ```
 
 请替换命令中的平台名和下载路径。
@@ -68,7 +76,10 @@ tar -xzf <下载目录>/native-runtime-linux-x64.tar.gz
 
 | 内容 | 用途 |
 | --- | --- |
-| `native/build/runtime/<平台>-<架构>/` | 原生库、依赖和包清单 |
+| `native/build/runtime/<平台>-<架构>/` | Android、macOS 原生库和包清单 |
+| `native/build/runtime/aarch64-apple-ios/` | iOS framework 和包清单 |
+| `android/app/src/main/jniLibs/<ABI>/` | Android 打包库 |
+| `ohos/entry/libs/<ABI>/` | OHOS 打包库 |
 | `assets/miri/manifest.<平台>-<架构>.json` | Flutter 运行库清单 |
 | `assets/miri/*.bin` | MIR 标准库和许可证 |
 | `native/include/` | C 接口声明 |
@@ -77,7 +88,7 @@ tar -xzf <下载目录>/native-runtime-linux-x64.tar.gz
 
 运行库需要完整的依赖和 MIR 数据。
 仅复制适配器 DLL 或 SO 无法满足要求。
-macOS framework 使用临时签名。
+Apple framework 使用临时签名。
 应用发布时仍需使用应用签名。
 
 构建成功只证明产物已生成。

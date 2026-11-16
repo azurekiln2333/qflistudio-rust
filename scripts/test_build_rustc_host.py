@@ -81,6 +81,42 @@ class BootstrapInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "without rustc-dev"):
             bootstrap.require_bootstrap_inputs(self.root, "x86_64-linux-android", "x86_64-unknown-linux-gnu")
 
+    def std_library(self, host):
+        directory = self.root / "lib/rustlib" / host / "lib"
+        directory.mkdir(parents=True, exist_ok=True)
+        for crate in ("core", "std", "rustc_demangle", "rustc_literal_escaper",
+                      "rustc_std_workspace_alloc", "rustc_std_workspace_core", "rustc_std_workspace_std"):
+            for suffix in ("rlib", "rmeta"):
+                (directory / f"lib{crate}-fixture.{suffix}").write_bytes(b"official std fixture")
+        return directory
+
+    def test_official_std_prefixed_crates_do_not_require_rustc_dev(self):
+        build_host = "x86_64-unknown-linux-gnu"
+        self.std_library(build_host)
+        for native_host in (build_host, "aarch64-linux-android", "aarch64-unknown-linux-ohos",
+                            "aarch64-apple-ios", "aarch64-apple-darwin"):
+            with self.subTest(native_host=native_host):
+                self.std_library(native_host)
+                bootstrap.require_bootstrap_inputs(self.root, native_host, build_host)
+
+    def test_private_compiler_crates_are_rejected_for_host_and_target(self):
+        build_host = "x86_64-unknown-linux-gnu"
+        native_host = "aarch64-linux-android"
+        for host in (build_host, native_host):
+            directory = self.std_library(host)
+            for crate in ("rustc_driver", "rustc_driver_impl", "rustc_interface", "rustc_session",
+                          "rustc_std_workspace_core_untrusted"):
+                for suffix in ("rlib", "rmeta"):
+                    with self.subTest(host=host, crate=crate, suffix=suffix):
+                        self.std_library(native_host)
+                        library = directory / f"lib{crate}-fixture.{suffix}"
+                        library.write_bytes(b"private fixture")
+                        try:
+                            with self.assertRaisesRegex(ValueError, "without rustc-dev"):
+                                bootstrap.require_bootstrap_inputs(self.root, native_host, build_host)
+                        finally:
+                            library.unlink()
+
     def test_source_archive_compiler_keeps_guest_metadata_identity(self):
         args = SimpleNamespace(native_host="x86_64-linux-android", build_root=self.root,
                                toolchain=self.root, jobs=1)

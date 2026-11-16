@@ -20,10 +20,12 @@ Every build uses Rust **1.98.1**, commit
 library build do not establish packaged source execution. Only available
 environments are tested; no Apple build or signing is claimed on Windows.
 
-### GitHub desktop builds
+### GitHub target runtime builds
 
-The **Native runtime** workflow builds Linux x64, Windows GNU x64 and macOS
-arm64 packages on GitHub-hosted runners. See the
+The **Native runtime** workflow uses official prebuilt Linux/macOS build tools
+to cross-compile Android arm64/x64, OHOS arm64/x64 and iOS arm64 device runtimes.
+macOS x64 is an optional manual target. Linux/Windows runtime packages are not
+built by this workflow. See the
 [download and storage guide](../docs/native-github-build.zh-CN.md).
 These packages contain the native runtime and guest data; they are not Flutter
 application installers. Check the actual workflow result for each platform.

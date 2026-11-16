@@ -3,19 +3,24 @@
 ## 1. Scope and trigger
 
 Apply to `.github/workflows/native-runtime.yml` and
-`scripts/ci_native_runtime.py`. The workflow builds desktop native runtimes,
-not Flutter applications. Linux x64, Windows GNU x64 and macOS arm64 have
-separate results. A successful native package does not establish app execution.
+`scripts/ci_native_runtime.py`. The workflow builds Android arm64/x64,
+OHOS arm64/x64 and iOS arm64 device runtimes, not Flutter applications.
+macOS x64 is optional. Linux/macOS are build hosts using official toolchains.
+Linux/Windows runtime packages are outside the CI target matrix.
+A successful native package does not establish app execution.
 
 ## 2. Signatures
 
 ```text
 python scripts/ci_native_runtime.py guest --work-root <fresh-root> --output-root <outputs>
-python scripts/ci_native_runtime.py runtime --work-root <fresh-root> --output-root <outputs> --native-host <host> --guest-archive <tar.gz>
+python scripts/ci_native_runtime.py runtime --work-root <fresh-root> --output-root <outputs> --build-host <official-toolchain-host> --native-host <target> --guest-archive <tar.gz>
 ```
 
 The compiler producer is `scripts/build_rustc_host.py`. Adapter and packaging
 commands retain the contracts in `compiler-build-provenance.md`.
+The OHOS PowerShell packager accepts `-ProjectRoot <output-root>` and
+`-GuestBuildInfo <miri-sysroot.json>`; the guest record defaults to that name
+under `-GuestSysroot`. Linux uses local paths and native LLVM executables.
 
 ## 3. Contracts
 
@@ -29,12 +34,14 @@ commands retain the contracts in `compiler-build-provenance.md`.
 - Preserve and fingerprint safe in-tree source symlinks. The official source
   archive contains LLVM CUDA test links on both Linux and Windows.
 - Keep large build roots in runner temporary storage. Upload no compiler cache.
-- Runtime artifacts are named `native-runtime-linux-x64`,
-  `native-runtime-windows-x64`, and `native-runtime-macos-arm64`.
+- Runtime artifacts are named `native-runtime-<platform>-<architecture>` for
+  android-arm64/x64, ohos-arm64/x64, ios-arm64, and optional macos-x64.
 - Each runtime artifact carries a tar.gz and matching SHA-256 file. Preserve
   executable modes and framework layouts inside the archive.
-- Archive paths preserve `native/build/runtime/<platform>-<architecture>/`
-  and `assets/miri/` for restoration at repository root. Include only the
+- Archive paths preserve native packages, platform library directories and
+  `assets/miri/` for restoration at repository root. iOS uses its native host
+  triple as package directory; OHOS keeps schema1 and `ohos/entry/libs/<ABI>`.
+  Include only the
   selected manifest's asset files, ABI headers, and original build records.
 - Runtime packages and diagnostics expire after 14 days. Intermediate guest
   artifacts expire after one day. Never mark failure diagnostics as a runtime.
@@ -62,7 +69,7 @@ commands retain the contracts in `compiler-build-provenance.md`.
 
 ## 6. Required tests
 
-Test host-specific bootstrap configuration, Windows DLL discovery, archive
+Test build-host/target separation, target std installation, SDK selection, archive
 path confinement, manifest coverage, checksum publication, and failures before
 runtime archive creation. Validate workflow syntax and execute the workflow
 on actual requested hosts. Record run URL, commit and per-job conclusions.

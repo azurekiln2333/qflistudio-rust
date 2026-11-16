@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 param(
   [Parameter(Mandatory = $true)][string]$AdapterLibrary,
   [Parameter(Mandatory = $true)][string]$AdapterBuildInfo,
@@ -6,16 +7,19 @@ param(
   [Parameter(Mandatory = $true)][string]$SdkRoot,
   [Parameter(Mandatory = $true)][string]$RustSource,
   [Parameter(Mandatory = $true)][string]$DependencyMetadata,
+  [string]$GuestBuildInfo,
   [string]$CodegenBackend,
   [ValidateSet('arm64', 'x64')][string]$Architecture = 'arm64',
   [string]$WslDistro = 'qfli-java-build',
-  [string]$PythonExecutable = 'python'
+  [string]$PythonExecutable = 'python',
+  [string]$ProjectRoot = (Join-Path $PSScriptRoot '..')
 )
 
 $ErrorActionPreference = 'Stop'
-$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$readobj = Join-Path $SdkRoot 'native/llvm/bin/llvm-readobj.exe'
-$readelf = Join-Path $SdkRoot 'native/llvm/bin/llvm-readelf.exe'
+$projectRoot = [IO.Path]::GetFullPath($ProjectRoot)
+$toolSuffix = if ($IsWindows) { '.exe' } else { '' }
+$readobj = Join-Path $SdkRoot "native/llvm/bin/llvm-readobj$toolSuffix"
+$readelf = Join-Path $SdkRoot "native/llvm/bin/llvm-readelf$toolSuffix"
 if ($Architecture -eq 'x64') {
   $abi = 'x86_64'
   $elfArch = 'x86_64'
@@ -30,9 +34,32 @@ if ($Architecture -eq 'x64') {
 }
 $guestTarget = 'x86_64-unknown-linux-gnu'
 $guestLibraries = Join-Path $GuestSysroot "lib/rustlib/$guestTarget/lib"
+if (-not $GuestBuildInfo) { $GuestBuildInfo = Join-Path $GuestSysroot 'miri-sysroot.json' }
 foreach ($required in @($readobj, $readelf, $AdapterLibrary, $AdapterBuildInfo, $CompilerLibDirectory,
-    $guestLibraries, $RustSource, $DependencyMetadata)) {
+    $guestLibraries, $GuestBuildInfo, $RustSource, $DependencyMetadata)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Missing package input: $required" }
+}
+
+$guestInfo = Get-Content -LiteralPath $GuestBuildInfo -Raw | ConvertFrom-Json
+if ($guestInfo.rustVersion -ne '1.98.1' -or
+    $guestInfo.rustCommit -ne '48a229ceaefd4985c50990b14116b6d856af0985' -or
+    $guestInfo.guestTarget -ne $guestTarget -or
+    ($guestInfo.schemaVersion -ne 1 -and $guestInfo.encodedMir -ne $true)) {
+  throw 'Guest MIR identity does not match the pinned compiler and interpreted target.'
+}
+$guestHashes = @{}
+foreach ($entry in $guestInfo.files) { $guestHashes[$entry.path] = $entry.sha256 }
+$guestFiles = @(Get-ChildItem -LiteralPath $guestLibraries -Filter '*.rlib' -File)
+if (-not @($guestFiles | Where-Object Name -Like 'libstd-*').Count -or
+    -not @($guestFiles | Where-Object Name -Like 'libcore-*').Count) {
+  throw 'Guest MIR standard-library data is incomplete.'
+}
+foreach ($file in $guestFiles) {
+  $relative = "sysroot/lib/rustlib/$guestTarget/lib/$($file.Name)"
+  $digest = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($guestHashes[$relative] -ne $digest) {
+    throw "Guest standard library differs from its build record: $($file.Name)"
+  }
 }
 
 function Assert-Architecture([string]$Path) {
@@ -55,6 +82,7 @@ function Get-NeededLibraries([string]$Path) {
 }
 
 function Resolve-LinuxInput([string]$Path) {
+  if (-not $IsWindows) { return $Path }
   if ($Path -match '^/mnt/([a-z])/(.*)$') {
     return "$(($Matches[1]).ToUpper()):\$($Matches[2].Replace('/', '\'))"
   }
@@ -65,9 +93,10 @@ function Resolve-LinuxInput([string]$Path) {
 # Validate producer paths through the explicitly selected WSL distribution.
 # This reads records and hashes only; the helper does not launch WSL.
 $buildSupport = Join-Path $PSScriptRoot 'miri_build_support.py'
-$verifiedJson = & $PythonExecutable $buildSupport 'verify-adapter' `
-  '--adapter-build-info' $AdapterBuildInfo '--adapter' $AdapterLibrary `
-  '--native-host' $hostTarget '--wsl-distro' $WslDistro
+$verifyArguments = @($buildSupport, 'verify-adapter', '--adapter-build-info', $AdapterBuildInfo,
+  '--adapter', $AdapterLibrary, '--native-host', $hostTarget)
+if ($IsWindows) { $verifyArguments += @('--wsl-distro', $WslDistro) }
+$verifiedJson = & $PythonExecutable @verifyArguments
 if ($LASTEXITCODE -ne 0) { throw 'Patched compiler and adapter provenance verification failed.' }
 $adapterRecord = ($verifiedJson -join "`n") | ConvertFrom-Json
 $metadataHash = (Get-FileHash -LiteralPath $DependencyMetadata -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -145,7 +174,7 @@ foreach ($name in $nativeFiles.Keys) {
   $copiedHash = (Get-FileHash -LiteralPath (Join-Path $nativeRoot $name) -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($copiedHash -ne $nativeHashes[$name]) { throw "Native input changed during packaging: $name" }
 }
-foreach ($file in (Get-ChildItem -LiteralPath $guestLibraries -Filter '*.rlib' -File)) {
+foreach ($file in $guestFiles) {
   Add-Asset $file.FullName "sysroot/lib/rustlib/$guestTarget/lib/$($file.Name)"
 }
 if ($CodegenBackend) {

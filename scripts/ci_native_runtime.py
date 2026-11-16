@@ -20,7 +20,21 @@ from miri_build_support import (
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
-CI_HOSTS = ("x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "aarch64-apple-darwin")
+CI_HOSTS = ("aarch64-linux-android", "x86_64-linux-android", "aarch64-unknown-linux-ohos",
+            "x86_64-unknown-linux-ohos", "aarch64-apple-ios", "x86_64-apple-darwin")
+
+
+def workflow_matrix(include_macos=False):
+    targets = [
+        ("ubuntu-24.04", "x86_64-unknown-linux-gnu", "aarch64-linux-android", "android-arm64"),
+        ("ubuntu-24.04", "x86_64-unknown-linux-gnu", "x86_64-linux-android", "android-x64"),
+        ("ubuntu-24.04", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-ohos", "ohos-arm64"),
+        ("ubuntu-24.04", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-ohos", "ohos-x64"),
+        ("macos-15-intel", "x86_64-apple-darwin", "aarch64-apple-ios", "ios-arm64"),
+    ]
+    if include_macos:
+        targets.append(("macos-15-intel", "x86_64-apple-darwin", "x86_64-apple-darwin", "macos-x64"))
+    return {"include": [dict(zip(("os", "build_host", "host", "package"), row)) for row in targets]}
 
 
 class Runner:
@@ -55,12 +69,14 @@ class Runner:
         if code:
             raise subprocess.CalledProcessError(code, command)
 
-    def toolchain(self, host, *, reference=False):
+    def toolchain(self, host, *, reference=False, target=None):
         name = f"{RUST_VERSION}-{host}"
         command = ["rustup", "toolchain", "install", name, "--profile", "minimal", "--no-self-update"]
         if reference:
             command += ["--component", "rustc-dev,rust-src"]
         self.run("install-toolchain", command)
+        if target and target != host:
+            self.run("install-target-std", ["rustup", "target", "add", "--toolchain", name, target])
         result = subprocess.run(["rustup", "which", "--toolchain", name, "rustc"],
                                 check=True, capture_output=True, text=True, env=self.env)
         toolchain = Path(result.stdout.strip()).resolve().parent.parent
@@ -116,24 +132,6 @@ def build_guest(runner):
     archive_tree(guest, runner.output / "guest-sysroot.tar.gz", "sysroot")
 
 
-def native_tool_args(host, environment):
-    if host == "x86_64-unknown-linux-gnu":
-        names = (("cc", "clang"), ("cxx", "clang++"), ("ar", "llvm-ar"),
-                 ("ranlib", "llvm-ranlib"), ("ld-lld", "ld.lld"))
-    elif host == "x86_64-pc-windows-gnu":
-        names = (("cc", "gcc"), ("cxx", "g++"), ("ar", "ar"), ("ranlib", "ranlib"),
-                 ("dlltool", "dlltool"))
-    else:
-        return []
-    result = []
-    for option, name in names:
-        path = shutil.which(name, path=environment.get("PATH"))
-        if not path:
-            raise ValueError(f"Missing native build tool: {name}")
-        result += ["--" + option, path]
-    return result
-
-
 def unpack_guest(archive, destination):
     checksum = archive.with_suffix(archive.suffix + ".sha256")
     fields = checksum.read_text(encoding="ascii").split() if checksum.is_file() else []
@@ -159,17 +157,26 @@ def prepare_adapter_cache(runner, toolchain, source, host):
 def collect_package(package_root, host, records, output, commit):
     platform, architecture = HOSTS[host]
     key = f"{platform}-{architecture}"
-    native = package_root / "native/build/runtime" / key
+    package_key = host if platform == "ios" else key
+    abi = "arm64-v8a" if architecture == "arm64" else "x86_64"
+    native_relative = (Path("ohos/entry/libs") / abi if platform == "ohos"
+                       else Path("native/build/runtime") / package_key)
+    native = package_root / native_relative
     manifest_path = package_root / "assets/miri" / f"manifest.{key}.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("nativeHost") != host or manifest.get("rustCommit") != RUST_COMMIT:
         raise ValueError("Generated package identity differs from this build")
     payload = output / "payload"
     payload.mkdir(parents=True)
-    shutil.copytree(native, payload / "native/build/runtime" / key)
+    shutil.copytree(native, payload / native_relative)
+    if platform == "android":
+        android_relative = Path("android/app/src/main/jniLibs") / abi
+        shutil.copytree(package_root / android_relative, payload / android_relative)
     assets = payload / "assets/miri"
     assets.mkdir(parents=True)
     shutil.copy2(manifest_path, assets / manifest_path.name)
+    if platform == "ohos" and architecture == "arm64":
+        shutil.copy2(manifest_path, assets / "manifest.json")
     for row in manifest["files"]:
         name = row["asset"]
         if Path(name).name != name or "/" in name or "\\" in name:
@@ -179,9 +186,10 @@ def collect_package(package_root, host, records, output, commit):
             raise ValueError(f"Generated asset changed before archive: {name}")
         shutil.copy2(source, assets / name)
     for row in manifest["nativeLibraries"]:
-        library = native / row["path"]
-        if sha256(library) != row["sha256"] or library.stat().st_size != row["size"]:
-            raise ValueError(f"Generated native library changed before archive: {row['path']}")
+        relative = row.get("path", row.get("name"))
+        library = native / relative
+        if sha256(library) != row["sha256"] or ("size" in row and library.stat().st_size != row["size"]):
+            raise ValueError(f"Generated native library changed before archive: {relative}")
     include = payload / "native/include"
     include.mkdir(parents=True)
     for name in ("qfli_miri.h", "qfli_debug.h"):
@@ -202,15 +210,25 @@ def collect_package(package_root, host, records, output, commit):
     return archive
 
 
-def build_runtime(runner, host, guest_archive):
+def build_runtime(runner, host, build_host, guest_archive):
+    platform, architecture = HOSTS[host]
     guest = unpack_guest(guest_archive, runner.work / "guest")
-    toolchain = runner.toolchain(host)
+    toolchain = runner.toolchain(build_host, target=host)
     source = runner.source()
     compiler_root = runner.work / "compiler"
+    tool_args = []
+    if platform == "android":
+        ndk = Path(runner.env["QFLI_ANDROID_NDK"])
+        tool_args = ["--ndk", ndk, "--android-api", "21"]
+    elif platform == "ohos":
+        sdk = Path(runner.env["QFLI_OHOS_SDK"])
+        tool_args = ["--ohos-sdk", sdk]
+        if runner.env.get("QFLI_OHOS_RESOURCE_DIR"):
+            tool_args += ["--ohos-resource-dir", runner.env["QFLI_OHOS_RESOURCE_DIR"]]
     runner.run("compiler-bootstrap", [sys.executable, "-u", SCRIPTS / "build_rustc_host.py",
                                       "--native-host", host, "--toolchain", toolchain,
                                       "--source", source, "--build-root", compiler_root, "--jobs", "2",
-                                      *native_tool_args(host, runner.env)])
+                                      *tool_args])
     compiler_record = compiler_root / "compiler-build.json"
     compiler = json.loads(compiler_record.read_text(encoding="utf-8"))
     miri = source / "src/tools/miri"
@@ -219,34 +237,35 @@ def build_runtime(runner, host, guest_archive):
     environment = dict(runner.env, QFLI_COMPILER_SYSROOT=compiler["compilerSysroot"],
                        QFLI_RUNTIME_SYSROOT=compiler["runtimeSysroot"],
                        QFLI_COMPILER_BUILD_INFO=str(compiler_record), QFLI_ADAPTER_BUILD_ROOT=str(adapter_root))
-    if os.name == "nt":
-        patch = shutil.which("patch", path=environment.get("PATH"))
-        if not patch:
-            raise ValueError("Windows adapter build requires GNU patch")
-        command = ["pwsh", "-NoProfile", "-File", SCRIPTS / "build_miri_adapter.ps1",
-                   "-MiriSource", miri, "-Toolchain", toolchain,
-                   "-CompilerSysroot", compiler["compilerSysroot"],
-                   "-RuntimeSysroot", compiler["runtimeSysroot"],
-                   "-CompilerBuildInfo", compiler_record, "-BuildRoot", adapter_root,
-                   "-CargoHome", runner.env["CARGO_HOME"], "-PatchExecutable", patch,
-                   "-PythonExecutable", sys.executable, "-Offline"]
-    else:
-        command = ["sh", SCRIPTS / "build_miri_adapter.sh", miri, toolchain, host]
+    if platform == "ohos":
+        environment["QFLI_OHOS_CLANG"] = str(sdk / "llvm/bin/clang")
+    command = ["sh", SCRIPTS / "build_miri_adapter.sh", miri, toolchain, host]
     runner.run("adapter-build", command, env=environment)
     adapter_record = adapter_root / f"adapter-build-{host}.json"
     package_root = runner.work / "package"
-    command = [sys.executable, SCRIPTS / "package_miri_runtime.py", "--build-info", adapter_record,
-               "--guest-sysroot", guest, "--guest-build-info", guest / "miri-sysroot.json",
-               "--rust-source", source, "--codegen-backend", compiler["codegenBackend"],
-               "--project-root", package_root]
-    search = [Path(compiler["runtimeSysroot"]) / "lib", Path(compiler["runtimeSysroot"]) / "bin"]
-    if sys.platform == "linux":
-        search += [Path("/lib/x86_64-linux-gnu"), Path("/usr/lib/x86_64-linux-gnu")]
-    elif os.name == "nt":
-        search += [Path(value) for value in runner.env.get("PATH", "").split(os.pathsep) if value]
-    for path in search:
-        if path.is_dir():
-            command += ["--compiler-lib-directory", path]
+    if platform == "ohos":
+        adapter = json.loads(adapter_record.read_text(encoding="utf-8"))
+        command = ["pwsh", "-NoProfile", "-File", SCRIPTS / "package_miri_ohos.ps1",
+                   "-AdapterLibrary", adapter["adapter"]["path"], "-AdapterBuildInfo", adapter_record,
+                   "-CompilerLibDirectory", Path(compiler["runtimeSysroot"]) / "lib",
+                   "-GuestSysroot", guest, "-GuestBuildInfo", guest / "miri-sysroot.json",
+                   "-SdkRoot", sdk.parent, "-RustSource", source,
+                   "-DependencyMetadata", adapter["dependencyMetadata"]["path"],
+                   "-CodegenBackend", compiler["codegenBackend"], "-Architecture", architecture,
+                   "-ProjectRoot", package_root, "-PythonExecutable", sys.executable]
+    else:
+        command = [sys.executable, SCRIPTS / "package_miri_runtime.py", "--build-info", adapter_record,
+                   "--guest-sysroot", guest, "--guest-build-info", guest / "miri-sysroot.json",
+                   "--rust-source", source, "--codegen-backend", compiler["codegenBackend"],
+                   "--project-root", package_root]
+        search = [Path(compiler["runtimeSysroot"]) / "lib"]
+        if platform == "android":
+            search += [ndk / "toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib" / host]
+        if platform == "macos":
+            command += ["--apple-deployment-target", "10.15"]
+        for path in search:
+            if path.is_dir():
+                command += ["--compiler-lib-directory", path]
     runner.run("package-runtime", command)
     archive = collect_package(package_root, host, {
         "compiler-build.json": compiler_record, "adapter-build.json": adapter_record,
@@ -257,21 +276,27 @@ def build_runtime(runner, host, guest_archive):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("guest", "runtime"))
-    parser.add_argument("--work-root", type=Path, required=True)
-    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("stage", choices=("guest", "runtime", "matrix"))
+    parser.add_argument("--work-root", type=Path)
+    parser.add_argument("--output-root", type=Path)
     parser.add_argument("--native-host", choices=CI_HOSTS)
+    parser.add_argument("--build-host", choices=("x86_64-unknown-linux-gnu", "x86_64-apple-darwin"))
     parser.add_argument("--guest-archive", type=Path)
     args = parser.parse_args()
-    if args.stage == "runtime" and (not args.native_host or not args.guest_archive):
-        parser.error("runtime requires --native-host and --guest-archive")
+    if args.stage == "matrix":
+        print(json.dumps(workflow_matrix(os.environ.get("INCLUDE_MACOS", "false") == "true")))
+        return
+    if not args.work_root or not args.output_root:
+        parser.error("build stages require --work-root and --output-root")
+    if args.stage == "runtime" and (not args.native_host or not args.build_host or not args.guest_archive):
+        parser.error("runtime requires --native-host, --build-host and --guest-archive")
     runner = Runner(args.work_root, args.output_root)
     status = {"stage": args.stage, "nativeHost": args.native_host, "status": "failed"}
     try:
         if args.stage == "guest":
             build_guest(runner)
         else:
-            build_runtime(runner, args.native_host, args.guest_archive.resolve())
+            build_runtime(runner, args.native_host, args.build_host, args.guest_archive.resolve())
         status["status"] = "success"
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         status["error"] = str(error)

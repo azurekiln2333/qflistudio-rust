@@ -6,9 +6,11 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
-from ci_native_runtime import archive_tree, collect_package, unpack_guest
-from miri_build_support import RUST_COMMIT, sha256
+from ci_native_runtime import Runner, archive_tree, collect_package, unpack_guest, workflow_matrix
+from miri_build_support import HOSTS, RUST_COMMIT, sha256
 
 
 class NativeArtifactsTest(unittest.TestCase):
@@ -49,24 +51,36 @@ class NativeArtifactsTest(unittest.TestCase):
             unpack_guest(archive, self.root / "unpacked")
         self.assertFalse((self.root / "escaped").exists())
 
-    def fixture(self):
+    def fixture(self, host="x86_64-unknown-linux-gnu"):
         package = self.root / "package"
-        native = package / "native/build/runtime/linux-x64"
+        platform, architecture = HOSTS[host]
+        key = f"{platform}-{architecture}"
+        abi = "arm64-v8a" if architecture == "arm64" else "x86_64"
+        relative = (Path("ohos/entry/libs") / abi if platform == "ohos"
+                    else Path("native/build/runtime") / (host if platform == "ios" else key))
+        native = package / relative
         native.mkdir(parents=True)
         library = native / "libqfli_miri.so"
         library.write_bytes(b"verified native fixture")
+        if platform == "android":
+            installed = package / "android/app/src/main/jniLibs" / abi
+            installed.mkdir(parents=True)
+            (installed / library.name).write_bytes(library.read_bytes())
         assets = package / "assets/miri"
         assets.mkdir(parents=True)
         asset = assets / "selected.bin"
         asset.write_bytes(b"MIR fixture")
         (assets / "unreferenced.bin").write_bytes(b"old file")
         manifest = {
-            "nativeHost": "x86_64-unknown-linux-gnu", "rustCommit": RUST_COMMIT,
+            "nativeHost": host, "rustCommit": RUST_COMMIT,
             "nativeLibraries": [{"path": library.name, "size": library.stat().st_size,
                                   "sha256": sha256(library)}],
             "files": [{"asset": asset.name, "size": asset.stat().st_size, "sha256": sha256(asset)}],
         }
-        (assets / "manifest.linux-x64.json").write_text(json.dumps(manifest), encoding="utf-8")
+        if platform == "ohos":
+            manifest["schemaVersion"] = 1
+            manifest["nativeLibraries"] = [{"name": library.name, "sha256": sha256(library)}]
+        (assets / f"manifest.{key}.json").write_text(json.dumps(manifest), encoding="utf-8")
         (native / "native-package.json").write_text(json.dumps(manifest), encoding="utf-8")
         record = self.root / "compiler.json"
         record.write_bytes(b'{"producerPath":"/original/runner/path"}\n')
@@ -102,6 +116,49 @@ class NativeArtifactsTest(unittest.TestCase):
             collect_package(package, "x86_64-unknown-linux-gnu",
                             {"compiler-build.json": record}, self.root / "output", "commit123")
         self.assertFalse(list((self.root / "output").glob("*.tar.gz")))
+
+    def test_mobile_layouts_restore_platform_packaging_inputs(self):
+        for host, native_path, manifest in [
+            ("aarch64-linux-android", "android/app/src/main/jniLibs/arm64-v8a/libqfli_miri.so",
+             "assets/miri/manifest.android-arm64.json"),
+            ("aarch64-apple-ios", "native/build/runtime/aarch64-apple-ios/libqfli_miri.so",
+             "assets/miri/manifest.ios-arm64.json"),
+            ("aarch64-unknown-linux-ohos", "ohos/entry/libs/arm64-v8a/libqfli_miri.so",
+             "assets/miri/manifest.json"),
+        ]:
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
+                self.root = Path(temporary)
+                package, _, _, record = self.fixture(host)
+                archive = collect_package(package, host, {"compiler-build.json": record},
+                                          self.root / "output", "commit123")
+                with tarfile.open(archive) as bundle:
+                    self.assertIn(native_path, bundle.getnames())
+                    self.assertIn(manifest, bundle.getnames())
+
+    def test_default_matrix_is_mobile_and_macos_is_opt_in(self):
+        default = workflow_matrix()["include"]
+        self.assertEqual({row["package"] for row in default},
+                         {"android-arm64", "android-x64", "ohos-arm64", "ohos-x64", "ios-arm64"})
+        self.assertEqual(len(workflow_matrix(True)["include"]), 6)
+        mac = workflow_matrix(True)["include"][-1]
+        self.assertEqual(mac["package"], "macos-x64")
+        self.assertEqual(mac["os"], "macos-15-intel")
+        ios = next(row for row in default if row["package"] == "ios-arm64")
+        self.assertEqual(ios["build_host"], "x86_64-apple-darwin")
+        self.assertEqual(ios["host"], "aarch64-apple-ios")
+
+    def test_cross_build_installs_build_host_toolchain_and_target_std(self):
+        runner = Runner(self.root / "work", self.root / "output")
+        compiler = self.root / "toolchain/bin/rustc"
+        with mock.patch.object(runner, "run") as run, \
+                mock.patch("ci_native_runtime.subprocess.run", return_value=SimpleNamespace(stdout=str(compiler))), \
+                mock.patch("ci_native_runtime.compiler_identity", return_value={"host": "x86_64-apple-darwin"}):
+            runner.toolchain("x86_64-apple-darwin", target="aarch64-apple-ios")
+        install = run.call_args_list[0].args[1]
+        self.assertIn("1.98.1-x86_64-apple-darwin", install)
+        self.assertNotIn("rustc-dev", install)
+        self.assertEqual(run.call_args_list[1].args[1],
+                         ["rustup", "target", "add", "--toolchain", "1.98.1-x86_64-apple-darwin", "aarch64-apple-ios"])
 
 
 if __name__ == "__main__":

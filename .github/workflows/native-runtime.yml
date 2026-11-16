@@ -2,6 +2,11 @@ name: Native runtime
 
 on:
   workflow_dispatch:
+    inputs:
+      include_macos:
+        description: Also build the optional macOS x64 native runtime
+        type: boolean
+        default: false
   push:
     branches: [ci/native-runtime, main, master, feat/rust-offline-ide-20261022]
     paths:
@@ -21,11 +26,18 @@ jobs:
     name: Shared Linux x64 MIR data
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
+      - name: Select mobile targets
+        id: targets
+        env:
+          INCLUDE_MACOS: ${{ inputs.include_macos || false }}
+        run: echo "matrix=$(python scripts/ci_native_runtime.py matrix)" >> "$GITHUB_OUTPUT"
       - name: Build pinned MIR guest data
         run: >-
           python -u scripts/ci_native_runtime.py guest
@@ -53,16 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            host: x86_64-unknown-linux-gnu
-            package: linux-x64
-          - os: windows-2022
-            host: x86_64-pc-windows-gnu
-            package: windows-x64
-          - os: macos-15
-            host: aarch64-apple-darwin
-            package: macos-arm64
+        include: ${{ fromJSON(needs.guest.outputs.matrix).include }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 240
     steps:
@@ -70,27 +73,25 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
-      - name: Install Linux compiler tools
-        if: runner.os == 'Linux'
+      - name: Install pinned Android NDK
+        if: startsWith(matrix.package, 'android-')
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang llvm lld
-      - name: Install Windows GNU tools
-        id: msys2
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
-        with:
-          msystem: MINGW64
-          update: false
-          install: mingw-w64-x86_64-gcc patch
-      - name: Expose Windows GNU tools
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'ndk;27.0.12077973'
+          echo "QFLI_ANDROID_NDK=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+      - name: Install verified OpenHarmony SDK
+        if: startsWith(matrix.package, 'ohos-')
+        shell: bash
         run: |
-          (Join-Path $env:MSYS2_LOCATION 'usr\bin') | Out-File -FilePath $env:GITHUB_PATH -Append
-          (Join-Path $env:MSYS2_LOCATION 'mingw64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append
+          python scripts/ci_ohos_sdk.py --destination "${{ runner.temp }}/qfli-ohos-sdk" --output build/native-ci/logs/ohos-sdk.json
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          record = json.loads(Path('build/native-ci/logs/ohos-sdk.json').read_text())
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f"QFLI_OHOS_SDK={record['nativeSdk']}\n")
+              output.write(f"QFLI_OHOS_RESOURCE_DIR={record['resourceDir']}\n")
+          PY
       - name: Download shared guest data
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -102,6 +103,7 @@ jobs:
           --work-root "${{ runner.temp }}/qfli-native"
           --output-root build/native-ci
           --native-host ${{ matrix.host }}
+          --build-host ${{ matrix.build_host }}
           --guest-archive build/native-guest/guest-sysroot.tar.gz
       - name: Upload native runtime
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

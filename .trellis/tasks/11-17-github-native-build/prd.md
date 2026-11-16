@@ -6,12 +6,12 @@ Move expensive native compilation to GitHub Actions. Let the user inspect build 
 ## Confirmed facts
 - GitHub repository: azurekiln2333/qflistudio-rust. No workflow or prior Actions run exists.
 - Current branch: feat/rust-offline-ide-20261022. Origin has five push URLs; push only the explicit GitHub URL.
-- User approved task creation and immediate implementation, then selected Linux, Windows and macOS.
+- User approved task creation and immediate implementation. The latest correction distinguishes build hosts from target runtimes: use official Linux/Windows tools and build Android, OHOS, iOS, with optional macOS. This supersedes the initial desktop target interpretation.
 - Adapter builders require patched compiler schema-2 provenance. The producer currently lacks Windows/macOS hosts.
 - Repository logical disk usage is 14.887 GiB; tracked files are 8.98 MiB. About 9.86 GiB is regenerable app/build cache.
 
 ## Requirements
-R1. Add reproducible GitHub-hosted native builds for Linux x64, Windows GNU x64 and macOS arm64.
+R1. Use official prebuilt build-host toolchains. Add target runtime builds for Android arm64/x64, OHOS arm64/x64 and iOS arm64 device. Offer macOS x64 as an optional manual target. Do not build Linux/Windows runtime packages in CI.
 R2. Preserve the pinned Rust version, source checksum, boundary patch and artifact provenance checks.
 R3. Upload complete platform runtime packages, guest data, ABI headers, checksums and build records. Upload diagnostic logs on failure.
 R4. Push only to GitHub and run the workflow. Report observed status and exact download location, including failures or platform limitations.
@@ -24,4 +24,4 @@ R5. Explain local disk use and cleanup candidates. Do not delete existing local 
 - Documentation distinguishes native runtime packages from app installers and explains Actions downloads and retention.
 
 ## Out of scope
-Mobile builds, Flutter app installers, release publishing, signing identities, changing runtime availability, and deleting local files.
+Linux/Windows runtime packages, iOS simulator builds, Flutter app installers, release publishing, signing identities, changing runtime availability, and deleting local files.

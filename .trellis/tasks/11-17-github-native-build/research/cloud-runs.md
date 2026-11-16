@@ -17,3 +17,15 @@
 
 Corrective work preserves and fingerprints safe source links rather than
 dropping source files or weakening compiler patch provenance.
+
+## Second run and scope correction
+
+- Run: https://github.com/azurekiln2333/qflistudio-rust/actions/runs/43929421178
+- Commit: 00b84c210b126ac00f585cc126c3437db7ebf33a
+- Guest succeeded again. Linux passed source-link validation, then minimal
+  toolchain detection falsely treated rust-std rustc_* facade libraries as
+  compiler-private rustc-dev metadata. Windows also failed; no runtime package.
+- macOS arm64 was not assigned a runner. GitHub annotations reported hosted
+  arm64 capacity constraints, not repository access or source errors.
+- User corrected scope to Android/OHOS/iOS and optional macOS. Linux and Windows
+  are official build-toolchain hosts, not requested runtime outputs.
