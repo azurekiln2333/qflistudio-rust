@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bootstrap patched compiler-private libraries for Linux, OHOS and mobile hosts."""
+"""Bootstrap patched compiler-private libraries for desktop and mobile hosts."""
 
 import argparse
 import json
@@ -22,7 +22,8 @@ from miri_build_support import (
 )
 
 BOOTSTRAP_HOSTS = [host for host, (platform, _) in HOSTS.items()
-                   if platform in ("linux", "ohos", "android", "ios")]
+                   if platform in ("linux", "ohos", "android", "ios", "macos")
+                   or host == "x86_64-pc-windows-gnu"]
 LINUX_BUILD_HOSTS = ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu")
 
 
@@ -109,6 +110,45 @@ def apple_tools(args, build_host):
         "ar": find("ar"), "ranlib": find("ranlib"),
         "sdk": sdk, "deploymentTarget": args.ios_deployment_target,
     }
+
+
+def macos_tools(args, build_host):
+    if sys.platform != "darwin" or not build_host.endswith("apple-darwin"):
+        raise ValueError("macOS compiler hosts must be built on macOS with Xcode")
+    sdk = run(["xcrun", "--sdk", "macosx", "--show-sdk-path"],
+              capture_output=True, text=True).stdout.strip()
+
+    def find(tool):
+        return executable(run(["xcrun", "--sdk", "macosx", "--find", tool],
+                              capture_output=True, text=True).stdout.strip())
+
+    architecture = "arm64" if args.native_host.startswith("aarch64") else "x86_64"
+    deployment = getattr(args, "macos_deployment_target", None) or (
+        "11.0" if architecture == "arm64" else "10.15")
+    flags = [f"--target={architecture}-apple-macosx{deployment}", "-isysroot", sdk]
+    os.environ["SDKROOT"] = sdk
+    os.environ["MACOSX_DEPLOYMENT_TARGET"] = deployment
+    return {
+        "cc": wrapper(args.build_root / "bin/target-clang", find("clang"), flags),
+        "cxx": wrapper(args.build_root / "bin/target-clang++", find("clang++"), flags),
+        "linker": wrapper(args.build_root / "bin/target-linker", find("clang"), flags),
+        "ar": find("ar"), "ranlib": find("ranlib"),
+        "sdk": sdk, "deploymentTarget": deployment,
+    }
+
+
+def windows_tools(args, build_host):
+    if os.name != "nt" or build_host != "x86_64-pc-windows-gnu" or args.native_host != build_host:
+        raise ValueError("Windows GNU compiler bootstrap requires a native Windows GNU x64 host")
+    tools = {}
+    for name in ("cc", "cxx", "ar", "ranlib", "dlltool"):
+        selected = getattr(args, name, None)
+        if selected is None:
+            raise ValueError(f"Supply --{name} with a preinstalled MinGW tool path")
+        tools[name] = executable(selected)
+    # The initial Python bootstrap invokes the configured linker as a C driver.
+    # gcc keeps that invocation valid without relying on later rustc-only flags.
+    return {**tools, "linker": tools["cc"], "compilerTarget": args.native_host}
 
 
 
@@ -199,6 +239,10 @@ def native_tools(args, build_host):
         return android_tools(args, build_host)
     if platform == "ios":
         return apple_tools(args, build_host)
+    if platform == "macos":
+        return macos_tools(args, build_host)
+    if platform == "windows":
+        return windows_tools(args, build_host)
     raise ValueError(f"Compiler bootstrap is unsupported for {args.native_host}")
 
 
@@ -314,7 +358,16 @@ def prepare_compiler_source(original, build_root):
     return destination, provenance
 
 
-def bootstrap_config(args, build_host, tools):
+def native_rustflags(native_host, tools):
+    if native_host == "x86_64-pc-windows-gnu":
+        return ["-C", f"dlltool={tools['dlltool']}"]
+    if "apple" in native_host:
+        return ["-C", "link-arg=-Wl,-rpath,@loader_path",
+                "-C", "link-arg=-Wl,-headerpad_max_install_names"]
+    return ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]
+
+
+def bootstrap_config(args, build_host, tools, source=None):
     def quote(value):
         return json.dumps(str(value).replace("\\", "/"))
 
@@ -324,7 +377,9 @@ def bootstrap_config(args, build_host, tools):
         f"build-dir = {quote(args.build_root / 'build')}",
         f"rustc = {quote(args.toolchain / 'bin' / ('rustc.exe' if os.name == 'nt' else 'rustc'))}",
         f"cargo = {quote(args.toolchain / 'bin' / ('cargo.exe' if os.name == 'nt' else 'cargo'))}",
-        f"jobs = {args.jobs}", "submodules = false", "local-rebuild = true",
+        f"jobs = {args.jobs}", "submodules = false", "local-rebuild = true", "locked-deps = true",
+        *(["vendor = true"] if source is not None and (source / "vendor").is_dir()
+          and (source / ".cargo/config.toml").is_file() else []),
         "optimized-compiler-builtins = false", "sanitizers = false", "profiler = false", "",
         "[rust]", 'channel = "stable"', "download-rustc = false",
         'codegen-backends = ["cranelift"]', "jemalloc = false", "llvm-tools = false",
@@ -332,10 +387,9 @@ def bootstrap_config(args, build_host, tools):
         'llvm-libunwind = "no"', "debuginfo-level = 0", "", "[llvm]",
         "download-ci-llvm = false", "", f"[target.{args.native_host}]",
         *[f"{name} = {quote(tools[name])}" for name in ("cc", "cxx", "linker", "ar", "ranlib")],
-        "crt-static = false", 'rustflags = ["-C", "link-arg=-Wl,-rpath,@loader_path", "-C", "link-arg=-Wl,-headerpad_max_install_names"]'
-        if "apple" in args.native_host else 'rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]',
+        "crt-static = false", "rustflags = " + json.dumps(native_rustflags(args.native_host, tools)),
     ]
-    if build_host == "x86_64-pc-windows-gnu":
+    if build_host == "x86_64-pc-windows-gnu" and args.native_host != build_host:
         lld = executable(args.toolchain / "lib/rustlib" / build_host / "bin/rust-lld.exe")
         lines += ["", f"[target.{build_host}]", f"linker = {quote(lld)}",
                   'rustflags = ["-C", "linker-flavor=ld.lld", "-C", "link-self-contained=yes"]']
@@ -370,9 +424,7 @@ def build_embedded_backend(args, source, private, runtime, tools, environment):
         f"--sysroot={private}", "-Cprefer-dynamic", "-Zdual-proc-macros",
         "-C", f"linker={tools['linker']}", "-L", f"native={target_lib}",
     ]
-    if "apple" in args.native_host:
-        flags += ["-C", "link-arg=-Wl,-rpath,@loader_path",
-                  "-C", "link-arg=-Wl,-headerpad_max_install_names"]
+    flags += native_rustflags(args.native_host, tools)
     backend_environment["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(flags)
     command = [args.toolchain / "bin" / ("cargo.exe" if os.name == "nt" else "cargo"),
                "-Zdual-proc-macros", "rustc", "--manifest-path",
@@ -396,7 +448,7 @@ def build_embedded_backend(args, source, private, runtime, tools, environment):
             if (message.get("reason") == "compiler-artifact"
                     and message.get("target", {}).get("name") == "rustc_codegen_cranelift"):
                 artifacts.update(Path(path) for path in message["filenames"]
-                                 if Path(path).suffix in (".so", ".dylib"))
+                                 if Path(path).suffix in (".so", ".dylib", ".dll"))
         if process.wait() != 0:
             raise RuntimeError("Embedded backend compilation failed; see embedded-backend.log")
     if len(artifacts) != 1:
@@ -407,6 +459,22 @@ def build_embedded_backend(args, source, private, runtime, tools, environment):
     installed = destination / f"librustc_codegen_cranelift-{RUST_VERSION}{backend.suffix}"
     shutil.copy2(backend, installed)
     return installed
+
+
+def install_compiler_runtime(private, runtime, native_host):
+    """Copy only rebuilt target runtime libraries, never bootstrap host binaries."""
+    target_lib = private / "lib/rustlib" / native_host / "lib"
+    windows = HOSTS[native_host][0] == "windows"
+    runtime_lib = runtime / ("bin" if windows else "lib")
+    runtime_lib.mkdir(parents=True, exist_ok=True)
+    patterns = (("*rustc_driver*.dll", "*std-*.dll") if windows else
+                ("*rustc_driver*.so", "*rustc_driver*.dylib", "libstd-*.so", "libstd-*.dylib"))
+    for pattern in patterns:
+        for library in target_lib.glob(pattern):
+            shutil.copy2(library, runtime_lib / library.name)
+    if not any(runtime_lib.glob("*rustc_driver*")):
+        raise ValueError("Bootstrap did not produce its native driver library")
+    return runtime_lib
 
 
 
@@ -424,7 +492,7 @@ def validate_build_paths(args):
         selected = getattr(args, key, None)
         if selected is not None:
             inputs.append((key, Path(selected).resolve()))
-    for key in ("cc", "cxx", "ar", "ranlib", "ld_lld"):
+    for key in ("cc", "cxx", "ar", "ranlib", "ld_lld", "dlltool"):
         selected = getattr(args, key, None)
         if selected is not None:
             selected = Path(selected)
@@ -454,9 +522,13 @@ def main():
                         help="Local target sysroot, required for Linux cross-architecture builds")
     for option in ("cc", "cxx", "ar", "ranlib", "ld-lld"):
         parser.add_argument("--" + option, type=Path,
-                            help="Explicit preinstalled LLVM tool for Linux/OHOS")
+                            help="Explicit preinstalled native compiler tool")
+    parser.add_argument("--dlltool", type=Path,
+                        help="Explicit MinGW dlltool for native Windows GNU builds")
     parser.add_argument("--android-api", type=int, default=21)
     parser.add_argument("--ios-deployment-target", default="13.0")
+    parser.add_argument("--macos-deployment-target",
+                        help="macOS minimum version (default: arm64 11.0, x64 10.15)")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--configure-only", action="store_true")
     args = parser.parse_args()
@@ -475,7 +547,7 @@ def main():
     input_source = complete_source(args)
     source, source_provenance = prepare_compiler_source(input_source, args.build_root)
     config = args.build_root / "bootstrap.toml"
-    config.write_text(bootstrap_config(args, fields["host"], tools), encoding="utf-8")
+    config.write_text(bootstrap_config(args, fields["host"], tools, source), encoding="utf-8")
     if args.configure_only:
         print(f"Configured {args.native_host}: {config}; no runtime was built")
         return
@@ -486,11 +558,13 @@ def main():
             raise ValueError(f"Existing {folder} output requires a fresh compiler build root")
     require_bootstrap_inputs(args.toolchain, args.native_host, fields["host"])
     environment = dict(os.environ, RUSTC_BOOTSTRAP="1", CARGO_HOME=str(args.build_root / "cargo"),
-                       CARGO_NET_OFFLINE="true")
+                       CARGO_NET_OFFLINE="true", PYTHONDONTWRITEBYTECODE="1")
     environment["PATH"] = str(args.toolchain / "bin") + os.pathsep + environment.get("PATH", "")
     for key in ("RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
         environment.pop(key, None)
-    if fields["host"] == "x86_64-pc-windows-gnu":
+    if args.native_host == "x86_64-pc-windows-gnu":
+        environment["PATH"] = str(tools["dlltool"].parent) + os.pathsep + environment["PATH"]
+    elif fields["host"] == "x86_64-pc-windows-gnu":
         prefix = "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_"
         environment[prefix + "LINKER"] = str(args.toolchain / "lib/rustlib" / fields["host"] / "bin/rust-lld.exe")
         environment[prefix + "RUSTFLAGS"] = "-C linker-flavor=ld.lld -C link-self-contained=yes"
@@ -498,7 +572,7 @@ def main():
         variable = "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
         environment[variable] = str(args.toolchain / "lib") + os.pathsep + environment.get(variable, "")
     for component in ("compiler/rustc_driver",):
-        command = [sys.executable, source / "x.py", "build", "--config", config, "--stage", "1",
+        command = [sys.executable, "-B", source / "x.py", "build", "--config", config, "--stage", "1",
                    "--host", args.native_host, "--target", args.native_host, component]
         log = args.build_root / (component.replace("/", "-") + ".log")
         with log.open("w", encoding="utf-8") as stream:
@@ -515,13 +589,7 @@ def main():
     target_lib = private / "lib/rustlib" / args.native_host / "lib"
     if not any(target_lib.glob("*rustc_driver*.rmeta")):
         raise ValueError(f"Bootstrap did not produce compiler-private metadata: {target_lib}")
-    runtime_lib = runtime / "lib"
-    runtime_lib.mkdir(parents=True, exist_ok=True)
-    for pattern in ("*rustc_driver*.so", "*rustc_driver*.dylib", "libstd-*.so", "libstd-*.dylib"):
-        for library in target_lib.glob(pattern):
-            shutil.copy2(library, runtime_lib / library.name)
-    if not any(runtime_lib.glob("*rustc_driver*")):
-        raise ValueError("Bootstrap did not produce its native driver library")
+    install_compiler_runtime(private, runtime, args.native_host)
     backend = build_embedded_backend(args, source, private, runtime, tools, environment)
     if tree_identity(source) != source_provenance["patchedTree"]:
         raise ValueError("Patched compiler source changed during the build")

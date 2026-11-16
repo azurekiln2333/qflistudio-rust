@@ -52,6 +52,11 @@ $adapterStage = Join-Path $BuildRoot 'adapter'
 & $PythonExecutable $buildSupport 'check-compiler' '--compiler-build-info' $CompilerBuildInfo `
   '--compiler-sysroot' $CompilerSysroot '--runtime-sysroot' $RuntimeSysroot '--native-host' $hostTriple
 if ($LASTEXITCODE -ne 0) { throw 'A verified rebuilt Windows compiler sysroot is required.' }
+$compilerInfo = Get-Content -Raw -LiteralPath $CompilerBuildInfo | ConvertFrom-Json
+$dlltool = [string]$compilerInfo.tools.dlltool
+if (-not $dlltool -or -not (Test-Path -LiteralPath $dlltool -PathType Leaf)) {
+  throw 'The rebuilt Windows compiler record must identify its installed MinGW dlltool.'
+}
 New-Item -ItemType Directory -Force -Path $BuildRoot, $miriStage, $adapterStage | Out-Null
 Copy-Item -Path (Join-Path $MiriSource '*') -Destination $miriStage -Recurse -Force
 Copy-Item -Path (Join-Path $projectRoot 'native/miri_adapter/*') -Destination $adapterStage -Recurse -Force
@@ -68,7 +73,7 @@ $environmentNames = @('PATH', 'CARGO_HOME', 'CARGO_TARGET_DIR', 'RUSTC', 'RUSTC_
 $previous = @{}
 foreach ($name in $environmentNames) { $previous[$name] = [Environment]::GetEnvironmentVariable($name) }
 try {
-  $env:PATH = "$(Join-Path $RuntimeSysroot 'bin');$(Join-Path $Toolchain 'bin');$env:PATH"
+  $env:PATH = "$(Join-Path $RuntimeSysroot 'bin');$(Join-Path $Toolchain 'bin');$(Split-Path -Parent $dlltool);$env:PATH"
   if ($CargoHome) { $env:CARGO_HOME = $CargoHome }
   $env:CARGO_TARGET_DIR = Join-Path $BuildRoot 'target'
   $env:RUSTC = $rustc
@@ -77,7 +82,7 @@ try {
   $env:CARGO_ENCODED_RUSTFLAGS = (@("--sysroot=$compiler", '-Cprefer-dynamic',
     "-Lnative=$(Join-Path $RuntimeSysroot 'bin')", "-Lnative=$(Join-Path $RuntimeSysroot 'lib')",
     "-Lnative=$(Join-Path $compiler "lib/rustlib/$hostTriple/lib")", '-Clinker-flavor=ld.lld' , "-Clinker=$linker",
-    '-Clink-self-contained=yes') -join [char]31)
+    '-Clink-self-contained=yes', "-Cdlltool=$dlltool") -join [char]31)
   $arguments = @('rustc', '--manifest-path', (Join-Path $adapterStage 'Cargo.toml'),
     '--target', $hostTriple, '--locked', '--lib')
   if ($Offline) { $arguments += '--offline' }

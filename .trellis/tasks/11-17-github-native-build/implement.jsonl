@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/native-runtime.md", "reason": "Native packaging and evidence contracts"}
+{"file": ".trellis/spec/backend/compiler-build-provenance.md", "reason": "Strict patched compiler identities and input protection"}

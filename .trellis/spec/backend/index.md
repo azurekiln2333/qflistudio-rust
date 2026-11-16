@@ -8,6 +8,7 @@ Read the contract for the layer being changed before implementing it.
 | --- | --- |
 | [Native Runtime](./native-runtime.md) | Pinned rustc/Miri ABI, architecture packages, signing and device evidence |
 | [Compiler Build Provenance](./compiler-build-provenance.md) | Patched compiler identities, immutable inputs and package hash binding |
+| [GitHub Native Builds](./github-native-builds.md) | Cloud build stages, downloadable archives, diagnostics and restoration |
 | [Offline Analysis](./offline-analysis.md) | Exact unsaved compiler diagnostics and cancellation ownership |
 | [Offline Debugger](./offline-debugger.md) | Real Miri pauses, copied values, generations and joined cleanup |
 | [Catalog Audit](./catalog-audit.md) | Complete inventory, exact output, durable reports and final HAP inspection |

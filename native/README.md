@@ -8,24 +8,35 @@ compilation remains a separate execution route.
 
 | Native host | Compiler-private inputs | Executable package |
 | --- | --- | --- |
-| Windows x64/arm64 | Exact matching official rustc-dev host component | DLL closure beside the desktop executable |
-| Linux x64/arm64 | Exact matching official rustc-dev host component | Shared libraries in the desktop bundle's `lib/` |
-| macOS x64/arm64 | Exact matching official rustc-dev host component | Signed frameworks in `Contents/Frameworks` |
+| Windows GNU x64 | Patched pinned compiler source bootstrap | DLL closure beside the desktop executable |
+| Linux x64/arm64 | Patched pinned compiler source bootstrap | Shared libraries in the desktop bundle's `lib/` |
+| macOS x64/arm64 | Patched pinned compiler source bootstrap with the macOS SDK | Signed frameworks in `Contents/Frameworks` |
 | Android x64/arm64 | Complete pinned compiler source bootstrap with the NDK | Extracted `jniLibs` in `nativeLibraryDir` |
 | iOS arm64 device, arm64/x64 simulator | Complete pinned compiler source bootstrap with Xcode | Signed frameworks in the app bundle |
-| OHOS arm64/x64 | Existing official/custom host pipeline | Existing schema-1 HAP libraries and assets |
+| OHOS arm64/x64 | Patched pinned compiler source bootstrap with the OHOS SDK | Existing schema-1 HAP libraries and assets |
 
 Every build uses Rust **1.98.1**, commit
 `48a229ceaefd4985c50990b14116b6d856af0985`. Platform integration and a successful
 library build do not establish packaged source execution. Only available
 environments are tested; no Apple build or signing is claimed on Windows.
 
-### Official desktop hosts
+### GitHub desktop builds
 
-Install the matching compiler, rustc-dev and rust-src components. On Linux or
-macOS, use an executable toolchain for that build machine:
+The **Native runtime** workflow builds Linux x64, Windows GNU x64 and macOS
+arm64 packages on GitHub-hosted runners. See the
+[download and storage guide](../docs/native-github-build.zh-CN.md).
+These packages contain the native runtime and guest data; they are not Flutter
+application installers. Check the actual workflow result for each platform.
+
+Current adapter code requires the project's compiler boundary patch. Official
+`rustc-dev` alone is no longer a valid adapter input. First bootstrap the patched
+compiler with `scripts/build_rustc_host.py` and a separate minimal pinned build
+toolchain. Then provide the generated compiler record and its two sysroots:
 
 ```sh
+export QFLI_COMPILER_BUILD_INFO=<compiler-build-root>/compiler-build.json
+export QFLI_COMPILER_SYSROOT=<compiler-private-sysroot>
+export QFLI_RUNTIME_SYSROOT=<compiler-runtime-sysroot>
 sh scripts/build_miri_adapter.sh <pinned-source>/src/tools/miri <toolchain> <native-host>
 ```
 
@@ -33,7 +44,10 @@ The script selects Linux `.so` or Apple `.dylib` output and checks the compiler
 revision and complete Miri source fingerprint. It writes an adapter build
 record with checksums for the actual adapter and compiler libraries. macOS
 requires Xcode command-line tools and Python 3. Windows uses
-`scripts/build_miri_adapter.ps1` with the exact matching Windows toolchain.
+`scripts/build_miri_adapter.ps1` with the exact matching Windows GNU toolchain
+and explicit `CompilerSysroot`, `RuntimeSysroot` and `CompilerBuildInfo` inputs.
+The POSIX adapter builder requires its locked Cargo dependencies to be available
+before the offline build. The CI helper prepares them on a fresh runner.
 
 Windows GNU also needs a real `dlltool` when building targets that generate
 import libraries, including a proc-macro crate's workspace test harness. The

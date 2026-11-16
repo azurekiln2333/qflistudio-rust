@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -151,6 +152,75 @@ class NativeToolConfigurationTests(unittest.TestCase):
                      "x86_64-unknown-linux-ohos", "aarch64-unknown-linux-ohos"):
             self.assertIn(host, bootstrap.BOOTSTRAP_HOSTS)
 
+    def test_cli_supports_desktop_hosts_without_claiming_windows_msvc(self):
+        for host in ("x86_64-pc-windows-gnu", "aarch64-apple-darwin", "x86_64-apple-darwin"):
+            self.assertIn(host, bootstrap.BOOTSTRAP_HOSTS)
+        self.assertNotIn("x86_64-pc-windows-msvc", bootstrap.BOOTSTRAP_HOSTS)
+
+    def test_windows_native_config_has_one_target_and_no_elf_linker_flags(self):
+        host = "x86_64-pc-windows-gnu"
+        args = self.args(host)
+        tools = {**self.local, "linker": self.local["cc"],
+                 "dlltool": self.root / "tool path/dlltool.exe"}
+        config = tomllib.loads(bootstrap.bootstrap_config(args, host, tools))
+        self.assertEqual(list(config["target"]), [host])
+        self.assertEqual(config["target"][host]["rustflags"],
+                         ["-C", f"dlltool={tools['dlltool']}"])
+        self.assertEqual(Path(config["target"][host]["linker"]), tools["linker"])
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows tool selection")
+    def test_windows_tools_require_explicit_dlltool_and_use_native_c_linker(self):
+        args = self.args("x86_64-pc-windows-gnu")
+        with self.assertRaisesRegex(ValueError, "Supply --dlltool"):
+            bootstrap.windows_tools(args, args.native_host)
+        args.dlltool = self.root / "local tools/dlltool.exe"
+        args.dlltool.write_bytes(b"fixture dlltool")
+        tools = bootstrap.windows_tools(args, args.native_host)
+        self.assertEqual(tools["linker"], args.cc.resolve())
+        self.assertEqual(tools["dlltool"], args.dlltool.resolve())
+
+    def test_windows_target_rejects_cross_host(self):
+        args = self.args("x86_64-pc-windows-gnu")
+        with self.assertRaisesRegex(ValueError, "native Windows GNU x64 host"):
+            bootstrap.windows_tools(args, "x86_64-unknown-linux-gnu")
+
+    def test_macos_tools_use_macos_sdk_and_architecture_deployment_target(self):
+        sdk = self.root / "MacOSX.sdk"
+        sdk.mkdir()
+        xcode = self.root / "xcode tools"
+        xcode.mkdir()
+        for name in ("clang", "clang++", "ar", "ranlib"):
+            (xcode / name).write_bytes(b"fixture xcode tool")
+
+        def xcrun(command, **kwargs):
+            self.assertEqual(command[:3], ["xcrun", "--sdk", "macosx"])
+            output = sdk if command[3] == "--show-sdk-path" else xcode / command[-1]
+            return SimpleNamespace(stdout=str(output) + "\n")
+
+        for host, target in (("aarch64-apple-darwin", "arm64-apple-macosx11.0"),
+                             ("x86_64-apple-darwin", "x86_64-apple-macosx10.15")):
+            with self.subTest(host=host), patch.object(bootstrap.sys, "platform", "darwin"), \
+                    patch.object(bootstrap, "run", side_effect=xcrun), patch.dict(os.environ):
+                previous_ios_target = os.environ.get("IPHONEOS_DEPLOYMENT_TARGET")
+                args = self.args(host)
+                tools = bootstrap.native_tools(args, host)
+                config = tomllib.loads(bootstrap.bootstrap_config(args, host, tools))
+                self.assertIn(target, tools["cc"].read_text())
+                self.assertEqual(tools["sdk"], str(sdk))
+                self.assertIn("link-arg=-Wl,-rpath,@loader_path", config["target"][host]["rustflags"])
+                self.assertEqual(os.environ.get("IPHONEOS_DEPLOYMENT_TARGET"), previous_ios_target)
+
+    def test_vendored_archive_enables_frozen_bootstrap_dependencies(self):
+        source = self.root / "source"
+        (source / "vendor").mkdir(parents=True)
+        (source / ".cargo").mkdir()
+        (source / ".cargo/config.toml").write_text("# fixture vendor configuration\n")
+        args = self.args("x86_64-unknown-linux-gnu")
+        tools = {**self.local, "linker": self.local["cc"]}
+        config = tomllib.loads(bootstrap.bootstrap_config(args, args.native_host, tools, source))
+        self.assertTrue(config["build"]["vendor"])
+        self.assertTrue(config["build"]["locked-deps"])
+
     def test_linux_native_config_uses_explicit_llvm_tools(self):
         args = self.args("x86_64-unknown-linux-gnu")
         tools = bootstrap.native_tools(args, "x86_64-unknown-linux-gnu")
@@ -268,6 +338,57 @@ class NativeToolConfigurationTests(unittest.TestCase):
                 selected.assert_called_once_with(args, "fixture-host")
 
 
+class DesktopRuntimeArtifactTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+
+    def test_windows_runtime_selects_rebuilt_dlls_and_excludes_import_archives(self):
+        host = "x86_64-pc-windows-gnu"
+        private = self.root / "private"
+        target = private / "lib/rustlib" / host / "lib"
+        target.mkdir(parents=True)
+        for name in ("rustc_driver-built.dll", "std-built.dll", "librustc_driver-built.dll.a"):
+            (target / name).write_bytes(name.encode())
+        (private / "bin").mkdir()
+        (private / "bin/rustc_driver-stock.dll").write_bytes(b"unrelated stock driver")
+        runtime = self.root / "runtime"
+        installed = bootstrap.install_compiler_runtime(private, runtime, host)
+        self.assertEqual(installed, runtime / "bin")
+        self.assertEqual(sorted(path.name for path in installed.iterdir()),
+                         ["rustc_driver-built.dll", "std-built.dll"])
+
+    def test_missing_driver_cannot_publish_runtime_from_std_alone(self):
+        host = "x86_64-pc-windows-gnu"
+        private = self.root / "private"
+        target = private / "lib/rustlib" / host / "lib"
+        target.mkdir(parents=True)
+        (target / "std-built.dll").write_bytes(b"std")
+        with self.assertRaisesRegex(ValueError, "native driver library"):
+            bootstrap.install_compiler_runtime(private, self.root / "runtime", host)
+
+    def test_backend_cargo_dll_is_installed_and_import_library_is_not_selected(self):
+        host = "x86_64-pc-windows-gnu"
+        backend = self.root / "rustc_codegen_cranelift.dll"
+        backend.write_bytes(b"fixture backend DLL")
+        artifact = {"reason": "compiler-artifact", "target": {"name": "rustc_codegen_cranelift"},
+                    "filenames": [str(backend), str(backend.with_suffix(".dll.a"))]}
+        process = SimpleNamespace(stdout=io.StringIO(json.dumps(artifact) + "\n"), wait=lambda: 0)
+        args = SimpleNamespace(native_host=host, build_root=self.root,
+                               toolchain=self.root / "toolchain", jobs=2)
+        tools = {key: self.root / (key + ".exe")
+                 for key in ("cc", "cxx", "linker", "ar", "ranlib", "dlltool")}
+        with patch.object(bootstrap.subprocess, "Popen", return_value=process) as cargo:
+            installed = bootstrap.build_embedded_backend(
+                args, self.root / "source", self.root / "private", self.root / "runtime", tools, {})
+        self.assertEqual(installed.suffix, ".dll")
+        self.assertEqual(installed.read_bytes(), backend.read_bytes())
+        flags = cargo.call_args.kwargs["env"]["CARGO_ENCODED_RUSTFLAGS"].split("\x1f")
+        self.assertIn(f"dlltool={tools['dlltool']}", flags)
+        self.assertFalse(any("-rpath" in flag for flag in flags))
+
+
 class BuildRootIsolationTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -342,7 +463,7 @@ class BuildRootIsolationTests(unittest.TestCase):
                     self.assert_rejected_without_effects(build, {key: input_root})
 
     def test_main_rejects_local_tool_parent_overlaps_in_both_directions(self):
-        for key in ("cc", "cxx", "ar", "ranlib", "ld_lld"):
+        for key in ("cc", "cxx", "ar", "ranlib", "ld_lld", "dlltool"):
             for direction in ("equal", "output-inside-input", "input-inside-output"):
                 with self.subTest(key=key, direction=direction):
                     case = self.root / "tools" / key / direction

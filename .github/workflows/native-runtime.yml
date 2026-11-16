@@ -1,0 +1,120 @@
+name: Native runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/native-runtime, main, master, feat/rust-offline-ide-20261022]
+    paths:
+      - '.github/workflows/native-runtime.yml'
+      - 'native/**'
+      - 'scripts/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guest:
+    name: Shared Linux x64 MIR data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Build pinned MIR guest data
+        run: >-
+          python -u scripts/ci_native_runtime.py guest
+          --work-root "${{ runner.temp }}/qfli-native"
+          --output-root build/native-ci
+      - name: Upload shared guest data
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-guest-sysroot
+          path: build/native-ci/guest-sysroot.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Upload guest diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-diagnostics-guest
+          path: build/native-ci/logs
+          retention-days: 14
+
+  runtime:
+    name: ${{ matrix.package }}
+    needs: guest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            host: x86_64-unknown-linux-gnu
+            package: linux-x64
+          - os: windows-2022
+            host: x86_64-pc-windows-gnu
+            package: windows-x64
+          - os: macos-15
+            host: aarch64-apple-darwin
+            package: macos-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Install Linux compiler tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm lld
+      - name: Install Windows GNU tools
+        id: msys2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc patch
+      - name: Expose Windows GNU tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          (Join-Path $env:MSYS2_LOCATION 'usr\bin') | Out-File -FilePath $env:GITHUB_PATH -Append
+          (Join-Path $env:MSYS2_LOCATION 'mingw64\bin') | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Download shared guest data
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-guest-sysroot
+          path: build/native-guest
+      - name: Build compiler, adapter and runtime package
+        run: >-
+          python -u scripts/ci_native_runtime.py runtime
+          --work-root "${{ runner.temp }}/qfli-native"
+          --output-root build/native-ci
+          --native-host ${{ matrix.host }}
+          --guest-archive build/native-guest/guest-sysroot.tar.gz
+      - name: Upload native runtime
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-runtime-${{ matrix.package }}
+          path: build/native-ci/native-runtime-${{ matrix.package }}.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload native diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-diagnostics-${{ matrix.package }}
+          path: build/native-ci/logs
+          retention-days: 14
