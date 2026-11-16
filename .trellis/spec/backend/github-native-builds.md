@@ -38,6 +38,10 @@ under `-GuestSysroot`. Linux uses local paths and native LLVM executables.
 - Preserve and fingerprint safe in-tree source symlinks. The official source
   archive contains LLVM CUDA test links on both Linux and Windows.
 - Keep large build roots in runner temporary storage. Upload no compiler cache.
+- Group workflow concurrency by ref and set `cancel-in-progress: false`.
+  Keep the active build running so its artifacts and diagnostics can finish.
+  A newer push replaces the pending run, not the active run. Only one run per
+  ref builds at a time.
 - Runtime artifacts are named `native-runtime-<platform>-<architecture>` for
   android-arm64/x64, ohos-arm64/x64, ios-arm64, and optional macos-x64.
 - Each runtime artifact carries a tar.gz and matching SHA-256 file. Preserve
