@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ci/native-runtime, main, master, feat/rust-offline-ide-20261022]
+    branches: [main]
     paths:
       - '.github/workflows/native-runtime.yml'
       - 'native/**'

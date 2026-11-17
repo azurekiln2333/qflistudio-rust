@@ -12,7 +12,7 @@
   "assignee": "lichengyu",
   "createdAt": "2026-11-17",
   "completedAt": null,
-  "branch": "ci/native-runtime",
+  "branch": "main",
   "base_branch": "feat/rust-offline-ide-20261022",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "User requested all current-repository branches merged, checked, and removed so only main remains. Root verified all previous local/remote tips are ancestors of d894819 and fast-forwarded main. GitHub default migration and branch cleanup are pending.",
   "meta": {}
 }

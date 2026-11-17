@@ -48,10 +48,11 @@ dropping source files or weakening compiler patch provenance.
   `-Zdual-proc-macros` also needs the Linux host dependency graph. Fetching the
   full locked graph fixes that cache gap while retaining offline adapter builds.
   Ten helper checks passed, including a real Cargo/local-registry reproduction.
-- iOS arm64 remains in progress. The current artifact list contains shared
-  guest data and diagnostic logs, not a complete native runtime.
+- iOS arm64 later completed successfully. The run failed overall because the
+  Android and OHOS jobs failed. Use the corrected all-platform run below for
+  the complete five-target artifact set.
 
-## Queued corrected run
+## Corrected run: all mobile targets succeeded
 
 - Run: https://github.com/azurekiln2333/qflistudio-rust/actions/runs/43946596992
 - Commit: 76289a080335389ad3a283c7278fa548e5cd0ba3
@@ -59,9 +60,34 @@ dropping source files or weakening compiler patch provenance.
   prefetch (3a57b37), and manual-dispatch documentation (9fa6a09).
 - Per-ref concurrency now keeps the active run and queues the newest update.
   GitHub confirmed this run pending while 43939926708 continued its iOS job.
-- All code changes are pushed. Runtime validation remains open; no complete
-  runtime artifact has been observed yet. Next step: inspect the active iOS
-  conclusion, then this corrected run's jobs and artifact inventory.
+- Final result checked on 2026-11-17: shared guest and all five mobile jobs
+  succeeded. The logs confirm compiler sysroots, Cranelift backends, adapter
+  records, platform manifests, runtime archives and two-file artifact uploads.
+- The five runtime artifacts are available until 2026-11-30 UTC:
+
+| Artifact | GitHub artifact ID | ZIP bytes |
+| --- | --- | ---: |
+| native-runtime-android-arm64 | 14271597100 | 128544961 |
+| native-runtime-android-x64 | 14269058863 | 128563834 |
+| native-runtime-ohos-arm64 | 14272446481 | 86388904 |
+| native-runtime-ohos-x64 | 14271771731 | 86139254 |
+| native-runtime-ios-arm64 | 14277174916 | 76132563 |
+
+- Each artifact download URL is the run URL followed by `/artifacts/<ID>`.
+  OHOS packaging reported 98 MIR/license assets per architecture.
+- Build/package success does not establish device execution. Records retain
+  runtimeExecuted=false and deviceExecuted=false. The independent review read
+  logs and artifact metadata without downloading complete runtime archives.
+
+## Main consolidation
+
+- User requested one remaining branch, main, after merge and checks.
+- Starting tips: local main 78fb7b1, local feature c423575, GitHub feature
+  b8a69a8, local/GitHub CI d894819. All tips are ancestors of d894819.
+- Main fast-forwarded to d894819 without conflicts. Native/scripts trees match
+  the successful 76289a0 build; subsequent edits were documentation/journals.
+- Git object connectivity passed. Root coordinates push/default migration and
+  removes old branches only after the remote main contains all previous tips.
 
 ## Separate license change
 

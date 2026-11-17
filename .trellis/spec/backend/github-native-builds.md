@@ -8,6 +8,10 @@ OHOS arm64/x64 and iOS arm64 device runtimes, not Flutter applications.
 macOS x64 is optional. Linux/macOS are build hosts using official toolchains.
 Linux/Windows runtime packages are outside the CI target matrix.
 A successful native package does not establish app execution.
+`main` is the repository's sole development and GitHub default branch.
+Push builds target `main`; manual dispatch includes optional macOS builds.
+Before removing merged branches, prove every local and remote tip is an
+ancestor of the pushed `main`, then change the default branch before deletion.
 
 ## 2. Signatures
 

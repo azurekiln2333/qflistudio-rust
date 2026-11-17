@@ -16,6 +16,7 @@ R2. Preserve the pinned Rust version, source checksum, boundary patch and artifa
 R3. Upload complete platform runtime packages, guest data, ABI headers, checksums and build records. Upload diagnostic logs on failure.
 R4. Push only to GitHub and run the workflow. Report observed status and exact download location, including failures or platform limitations.
 R5. Explain local disk use and cleanup candidates. Do not delete existing local outputs in this task.
+R6. Consolidate all current-repository local and GitHub branches into main, verify every tip is retained, set GitHub default to main, and delete the merged branches after verification. Other push destinations are outside this GitHub task.
 
 ## Acceptance
 - Workflow and build helpers pass relevant static and unit checks.

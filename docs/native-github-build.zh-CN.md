@@ -28,32 +28,33 @@ Linux 和 macOS 充当构建机器。
 
 ## 触发构建
 
-当前工作流位于 `ci/native-runtime` 分支。
-向该分支推送构建文件会自动触发构建。
+当前工作流位于 `main` 分支。
+向 `main` 推送构建文件会自动触发构建。
 仅改文档不会触发构建。
 
-截至 2026-11-17，仓库分支状态如下：
-
-| 分支用途 | 分支名 | 工作流文件 |
-| --- | --- | --- |
-| 构建分支 | `ci/native-runtime` | 已包含 |
-| 默认分支 | `feat/rust-offline-ide-20261022` | 尚未包含 |
-
 可选 macOS 构建使用手动触发。
-GitHub 要求默认分支包含工作流文件。
 手动触发使用 `workflow_dispatch` 事件。
-因此，需先将工作流合并到默认分支。
-当前构建分支的自动触发不受此限制。
 
-合并后，可按以下步骤启动 macOS 构建：
+按以下步骤启动 macOS 构建：
 
 1. 打开 **Native runtime** 工作流。
 2. 点击 **Run workflow**。
-3. 选择所需分支。
+3. 选择 `main` 分支。
 4. 勾选 `include_macos`。
 5. 点击 **Run workflow**。
 
-此规则来自 [GitHub 手动运行工作流文档](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)。
+## 已验证的构建
+
+2026-11-17，以下五个目标已构建成功：
+
+- Android arm64、x64。
+- OHOS arm64、x64。
+- iOS arm64 设备。
+
+成功运行：[43946596992](https://github.com/azurekiln2333/qflistudio-rust/actions/runs/43946596992)。
+构建提交为 `76289a0`。
+产物位于该页面的 **Artifacts** 区域。
+本轮未构建可选 macOS 目标。
 
 ## 下载产物
 
