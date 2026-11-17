@@ -88,6 +88,12 @@ dropping source files or weakening compiler patch provenance.
   the successful 76289a0 build; subsequent edits were documentation/journals.
 - Git object connectivity passed. Root coordinates push/default migration and
   removes old branches only after the remote main contains all previous tips.
+- Commit 540674f was pushed to main. The API verified its tip before setting
+  default_branch=main. Both old GitHub branches were deleted atomically with
+  expected-tip leases. Local branches were deleted with `git branch -d`.
+- Fetch/prune left only local main and remote origin/main. Local main tracks
+  origin/main and origin/HEAD points to main. No native source changed during
+  consolidation; actionlint, Chinese lint and independent ancestry checks passed.
 
 ## Separate license change
 

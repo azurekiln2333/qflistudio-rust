@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "User requested all current-repository branches merged, checked, and removed so only main remains. Root verified all previous local/remote tips are ancestors of d894819 and fast-forwarded main. GitHub default migration and branch cleanup are pending.",
+  "notes": "All five mobile native jobs succeeded in run 43946596992. All previous local/GitHub branch tips are ancestors of main. Main is pushed and is GitHub default; both merged branches were deleted locally and remotely with expected-tip protection. Only main remains.",
   "meta": {}
 }
