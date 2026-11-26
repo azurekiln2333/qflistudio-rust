@@ -1,0 +1,4 @@
+# Historical rescue is a raw-byte archive, including original mixed line endings.
+# This directory-local rule covers only this tree and all of its descendants.
+# Do not normalize archived source, patches, evidence or the raw-hash manifest.
+* -text

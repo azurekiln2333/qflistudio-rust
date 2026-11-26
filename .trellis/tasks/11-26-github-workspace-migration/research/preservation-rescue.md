@@ -178,3 +178,39 @@ deletion term consistently, and call the shared WSL resource space rather than
 rotating save/storage terms. No rule suppression or baseline increase was added.
 Technical requirements and modality were preserved. The document was read back;
 no local lint or validation ran. A new hosted run must confirm the correction.
+
+## Raw-byte Git correction — 2026-11-27
+
+The coordinator reported that commit
+`a07511394cfc8a8079e226e37468c571b9d0ed1e` contains normalized Git blobs for
+43 of the 119 rescued copies. Those Git blob bytes differ from the manifest's
+raw SHA-256 values because CRLF normalization occurred during staging. The
+earlier exact-copy claims describe the rescue worktree bytes, not a successful
+raw-byte publication contract for that initial commit. Retain `a075113` as the
+historical normalized representation; do not amend or rewrite its history.
+
+A read-only worktree inventory on 2026-11-27 at 05:06 +08:00 found all 119
+manifest-listed copied files present, with zero raw byte-length/hash differences.
+The raw manifest remains unchanged at SHA-256
+`9521f09701b5aebc749b6329b8ba1ccd311057d9a9c18310a9ca2f77cf872e84`.
+Original source files and original Git objects were not modified.
+
+The corrective contract is the new directory-local file
+`.trellis/tasks/11-26-github-workspace-migration/research/preserved-source/.gitattributes`.
+Its rule is `* -text`. It disables Git text normalization only for this
+historical rescue tree, including descendants, archived patches/evidence and
+the raw-hash manifest. No root or sibling attribute rule was changed. Existing
+line endings in these archived files are evidence, not a formatting defect.
+
+The coordinator must restage the existing exact worktree copies with this
+attribute contract active, compare every resulting index blob with its recorded
+raw SHA-256/length, and publish a corrective follow-up commit. Adding the
+attribute file alone does not repair blobs already in the index or in history.
+The corrected index, follow-up commit and receiving-clone byte identity remain
+pending until the coordinator reports that evidence. Worker A performed no
+staging, commit, checkout, renormalization, hook execution or local check.
+
+The coordinator also reported that all four cloud-check jobs passed at
+`a075113`. That hosted result is retained as reported evidence for its checked
+scope; it does not prove raw-byte rescue identity or validate a not-yet-created
+corrective commit. No new hosted result or local execution is claimed here.

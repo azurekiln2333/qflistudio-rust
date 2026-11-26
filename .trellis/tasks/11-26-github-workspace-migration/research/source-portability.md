@@ -251,3 +251,23 @@ validation and receiving-clone gates. Receiver diagnostics remain only
 Worker A did not stage or commit this resolution note and ran no local
 executable checks. The coordinator committed the earlier preservation report as
 `c859677`.
+
+## Raw-byte publication follow-up — 2026-11-27
+
+The rescue completion above refers to preserved worktree copies and their
+ledger, not proof that initial Git publication retained every raw byte. The
+coordinator found CRLF-normalized Git blobs for 43 of 119 copies in `a075113`.
+A read-only worktree inventory still found all 119 copies present and matching
+the unchanged manifest's raw byte lengths and SHA-256 hashes.
+
+The corrective directory-local contract is
+`.trellis/tasks/11-26-github-workspace-migration/research/preserved-source/.gitattributes`,
+with `* -text` scoped only to that rescue tree and descendants. Exact corrective
+steps and evidence boundaries are appended under `Raw-byte Git correction` in
+`.trellis/tasks/11-26-github-workspace-migration/research/preservation-rescue.md`.
+The manifest and original objects remain untouched. Historical `a075113` is not
+rewritten. Coordinator restaging, raw index-blob comparison, a follow-up commit
+and receiving-clone byte identity remain pending. The reported four passing
+cloud jobs at `a075113` do not establish those raw-byte preservation gates.
+Worker A made only the scoped attribute/document edits and performed no Git
+writes or local executable checks.
