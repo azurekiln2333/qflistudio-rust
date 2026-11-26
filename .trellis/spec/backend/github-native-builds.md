@@ -1,5 +1,9 @@
 # GitHub native builds
 
+All commands and regressions below run only on GitHub-hosted Actions runners.
+Read [Cloud-only workspace](../guides/cloud-only-workspace.md). Do not download,
+restore or verify runtime artifacts in either local editing clone.
+
 ## 1. Scope and trigger
 
 Apply to `.github/workflows/native-runtime.yml` and

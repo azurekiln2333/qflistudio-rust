@@ -19,7 +19,7 @@
   "pr_url": null,
   "subtasks": [],
   "children": [],
-  "parent": null,
+  "parent": "11-26-github-workspace-migration",
   "relatedFiles": [],
   "notes": "All five mobile native jobs succeeded in run 43946596992. All previous local/GitHub branch tips are ancestors of main. Main is pushed and is GitHub default; both merged branches were deleted locally and remotely with expected-tip protection. Only main remains.",
   "meta": {}

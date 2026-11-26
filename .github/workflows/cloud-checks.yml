@@ -1,0 +1,275 @@
+name: Cloud checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  helper-tests:
+    name: Python contracts (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Require hosted fixture tools
+        run: |
+          python - <<'PY'
+          import os, shutil, subprocess
+          from pathlib import Path
+          if os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
+              raise SystemExit('Checks require a GitHub-hosted runner')
+          for name in ('rustup', 'cargo', 'pwsh'):
+              if not shutil.which(name):
+                  raise SystemExit(f'Missing fixture prerequisite: {name}')
+          # Prevent the Cargo-prefetch regression silently skipping its real fixture.
+          subprocess.run(['rustup', 'which', 'cargo'], check=True)
+          Path(os.environ['RUNNER_TEMP'], 'qfli-check-results').mkdir()
+          PY
+      - name: Native helper, bootstrap, provenance and package regressions
+        run: |
+          set -o pipefail
+          python - <<'PY'
+          from pathlib import Path
+          required = ('test_ci_native_runtime.py', 'test_ci_ohos_sdk.py',
+                      'test_build_rustc_host.py', 'test_miri_build_support.py',
+                      'test_compiler_provenance_consumers.py',
+                      'test_package_miri_ohos.py', 'test_inspect_rust_catalog_hap.py')
+          missing = [name for name in required if not Path('scripts', name).is_file()]
+          if missing:
+              raise SystemExit(f'Missing mandatory native suites: {missing}')
+          PY
+          python -m unittest discover -s scripts -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/qfli-check-results/native-tests.log"
+      - name: Application helper suites when committed
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee "$RUNNER_TEMP/qfli-check-results/app-tests.log"
+          import os, subprocess, sys
+          from pathlib import Path
+          tracked = subprocess.check_output(
+              ['git', 'ls-files', '-z', '--', 'tool/ci',
+               '.github/workflows/app-installers.yml']).decode().split('\0')
+          tracked = {name for name in tracked if name}
+          if not tracked:
+              note = ('Application helper coverage: NOT RUN. No application CI '
+                      'files are committed in this revision. Native-only checks '
+                      'do not establish application or installer acceptance.')
+              print('::notice::' + note)
+          else:
+              required = {'tool/ci/ci_support.py', 'tool/ci/app_build.py',
+                          'tool/ci/package_installer.py',
+                          'tool/ci/test_app_build.py',
+                          'tool/ci/test_package_installer.py'}
+              missing = sorted(name for name in required
+                               if name not in tracked or not Path(name).is_file())
+              if missing:
+                  raise SystemExit(f'Committed application CI is incomplete: {missing}')
+              subprocess.run([sys.executable, '-m', 'unittest', 'discover',
+                              '-s', 'tool/ci', '-p', 'test_*.py', '-v'], check=True)
+              note = ('Application helper suites passed. Flutter builds, target '
+                      'installers, signing and device execution are separate checks.')
+              print(note)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
+              output.write('### Application helper coverage\n\n' + note + '\n')
+          PY
+      - name: Retain check logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cloud-checks-${{ matrix.os }}
+          path: ${{ runner.temp }}/qfli-check-results
+          if-no-files-found: warn
+          retention-days: 14
+
+  source-policy:
+    name: Source, workflow and portability policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Install pinned workflow parser
+        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+      - name: Parse committed operational Python without generating bytecode
+        run: |
+          python - <<'PY'
+          import ast, subprocess
+          from pathlib import Path
+          roots = ('scripts', 'tool/ci', '.trellis/scripts', '.codex/hooks', '.trae/hooks')
+          paths = subprocess.check_output(['git', 'ls-files', '-z', '--', *roots]).decode().split('\0')
+          count = 0
+          for name in paths:
+              if name.endswith('.py'):
+                  ast.parse(Path(name).read_text(encoding='utf-8-sig'), filename=name)
+                  count += 1
+          if not count:
+              raise SystemExit('No operational Python sources were checked')
+          print(f'Parsed {count} committed Python sources without executing them')
+          PY
+      - name: Check committed shell and PowerShell syntax
+        run: |
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(git ls-files -z -- 'scripts/*.sh')
+          pwsh -NoProfile -Command '
+            $failed = $false
+            foreach ($path in (git ls-files -- "scripts/*.ps1")) {
+              $tokens = $null; $parseErrors = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseFile(
+                (Join-Path (Get-Location) $path), [ref]$tokens, [ref]$parseErrors)
+              foreach ($problem in $parseErrors) {
+                Write-Output "$path : $problem"
+                $failed = $true
+              }
+            }
+            if ($failed) { exit 1 }
+          '
+      - name: Verify workflow parsing and immutable Node 24 actions
+        run: |
+          python - <<'PY'
+          import re, subprocess, urllib.request
+          from pathlib import Path
+          import yaml
+          # These are the reviewed native/app action pins, not a core dependency.
+          pins = {
+              'actions/checkout': '3d3c42e5aac5ba805825da76410c181273ba90b1',
+              'actions/setup-python': '6d4fd22b20465ccc0f7354476588e8df7c9ca0e0',
+              'actions/setup-java': 'de7274f081f381c8f8158605e0321c36c376e2e6',
+              'actions/upload-artifact': 'cf430e030ddbb5b0abf93d22962f4752f3646cd9',
+              'actions/download-artifact': '9000827ccba6bdab643e8b6fd33ac0654aef8333',
+          }
+          paths = subprocess.check_output(
+              ['git', 'ls-files', '-z', '--', '.github/workflows']).decode().split('\0')
+          references = set()
+          for name in paths:
+              if not name.endswith(('.yml', '.yaml')):
+                  continue
+              workflow = yaml.load(Path(name).read_text(), Loader=yaml.BaseLoader)
+              if not isinstance(workflow, dict) or not isinstance(workflow.get('jobs'), dict):
+                  raise SystemExit(f'Invalid workflow structure: {name}')
+              for job in workflow['jobs'].values():
+                  uses = [job['uses']] if 'uses' in job else []
+                  uses += [step['uses'] for step in job.get('steps', []) if 'uses' in step]
+                  for reference in uses:
+                      owner, separator, commit = reference.rpartition('@')
+                      if (not separator or not re.fullmatch(r'[0-9a-f]{40}', commit)
+                              or pins.get(owner) != commit):
+                          raise SystemExit(f'Unreviewed action in {name}: {reference}')
+                      references.add(reference)
+          for reference in sorted(references):
+              owner, commit = reference.rsplit('@', 1)
+              url = f'https://raw.githubusercontent.com/{owner}/{commit}/action.yml'
+              with urllib.request.urlopen(url, timeout=60) as response:
+                  action = yaml.safe_load(response.read())
+              if action.get('runs', {}).get('using') != 'node24':
+                  raise SystemExit(f'Action does not declare Node 24: {reference}')
+              print(f'Verified {reference}: node24')
+          PY
+      - name: Check workflow expressions with pinned actionlint
+        run: |
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz' \
+            --output "$RUNNER_TEMP/actionlint/actionlint.tar.gz"
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$RUNNER_TEMP/actionlint/actionlint.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/actionlint/actionlint.tar.gz" -C "$RUNNER_TEMP/actionlint" actionlint
+          "$RUNNER_TEMP/actionlint/actionlint" -color -shellcheck= -pyflakes=
+      - name: Verify source visibility and local-state exclusions
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path, PurePosixPath
+          import yaml
+          hidden = ('.trellis/.developer', '.trellis/.current-task',
+                    '.trellis/.runtime/sessions/probe.json',
+                    '.trellis/.template-hashes.json', '.trellis/hooks.local.json',
+                    '.trellis/config.local.yaml', '.trellis/scripts/__pycache__/probe.pyc',
+                    '.pi/settings.json', '.dart_tool/package_config.json',
+                    'build/probe.txt', 'native/build/probe.so',
+                    'android/app/src/main/jniLibs/arm64-v8a/probe.so',
+                    'ohos/entry/libs/arm64-v8a/probe.so',
+                    'assets/miri/probe.bin', '.env', 'signing/probe.p12',
+                    'signing/probe.mobileprovision',
+                    '.agents/skills/unreviewed-skill/SKILL.md')
+          visible = ('AGENTS.md', '.trellis/.gitignore', '.trellis/.version',
+                     '.trellis/config.yaml', '.trellis/workflow.md',
+                     '.trellis/scripts/task.py', '.trellis/spec/guides/cloud-only-workspace.md',
+                     '.trellis/tasks/00-bootstrap-guidelines/prd.md',
+                     '.trellis/workspace/index.md',
+                     '.agents/skills/trellis-before-dev/SKILL.md',
+                     '.agents/skills/trellis-check/SKILL.md',
+                     '.agents/skills/trellis-channel/references/workflows.md',
+                     'assets/miri/.gitkeep')
+          tracked = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          tracked = {name for name in tracked if name}
+          for name in hidden + visible:
+              result = subprocess.run(['git', 'check-ignore', '--no-index', '-q', '--', name])
+              expected = 0 if name in hidden else 1
+              if result.returncode != expected:
+                  raise SystemExit(f'Incorrect ignore policy: {name}')
+          for name in visible:
+              if name not in tracked or not Path(name).is_file():
+                  raise SystemExit(f'Portable source is absent from commit: {name}')
+          suffixes = {'.apk', '.aab', '.hap', '.hsp', '.ipa', '.dmg', '.deb', '.rpm',
+                      '.dll', '.so', '.exe', '.rlib', '.rmeta', '.vhd', '.vhdx',
+                      '.jks', '.keystore', '.p12', '.pfx', '.pem', '.key',
+                      '.mobileprovision', '.provisionprofile', '.pyc'}
+          for name in tracked:
+              path = PurePosixPath(name)
+              if (path.suffix.lower() in suffixes
+                      or set(path.parts) & {'build', '__pycache__', '.dart_tool', '.runtime', 'node_modules'}
+                      or path.name in {'.developer', '.current-task', '.env', 'key.properties'}
+                      or path.name.startswith('.env.') and path.name not in {'.env.example', '.env.sample'}):
+                  raise SystemExit(f'Generated/private path is tracked: {name}')
+          config = yaml.load(Path('.trellis/config.yaml').read_text(), Loader=yaml.BaseLoader)
+          if str(config.get('session_auto_commit')).lower() != 'false':
+              raise SystemExit('Portable config must disable helper auto-commits')
+          print('Portable source is committed; runtime/generated/private paths remain excluded')
+          PY
+      - name: Check controlled Chinese tooling and native-build guidance
+        run: |
+          python scripts/ste-lint-zh.py --selftest
+          python scripts/ste-lint-zh.py docs/native-github-build.zh-CN.md
+      - name: Record independent-check boundary
+        if: always()
+        run: |
+          {
+            echo '## Independent cloud checks'
+            echo
+            echo "Revision: \`$GITHUB_SHA\`; event: \`$GITHUB_EVENT_NAME\`."
+            echo 'These jobs do not select a core SHA or build a compiler, Flutter app or installer.'
+            echo 'Only successful job/step conclusions establish the checks they actually ran.'
+            echo 'Final core/Flutter compatibility, platform packages, signing and device execution remain separate.'
+          } >> "$GITHUB_STEP_SUMMARY"

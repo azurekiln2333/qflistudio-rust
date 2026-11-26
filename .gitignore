@@ -86,19 +86,99 @@ app.*.map.json
 /.workbuddy-ai/
 /.zcode/
 
-# Local Trellis/agent runtime metadata. Committed task artifacts remain visible.
-/.agents/
+# Portable agent knowledge: only reviewed Markdown skills/references are visible.
+# Keep other .agents content and future skills local until explicitly reviewed.
+/.agents/**
+!/.agents/skills/
+!/.agents/skills/trellis-before-dev/
+!/.agents/skills/trellis-before-dev/**/
+!/.agents/skills/trellis-before-dev/**/*.md
+!/.agents/skills/trellis-brainstorm/
+!/.agents/skills/trellis-brainstorm/**/
+!/.agents/skills/trellis-brainstorm/**/*.md
+!/.agents/skills/trellis-break-loop/
+!/.agents/skills/trellis-break-loop/**/
+!/.agents/skills/trellis-break-loop/**/*.md
+!/.agents/skills/trellis-channel/
+!/.agents/skills/trellis-channel/**/
+!/.agents/skills/trellis-channel/**/*.md
+!/.agents/skills/trellis-check/
+!/.agents/skills/trellis-check/**/
+!/.agents/skills/trellis-check/**/*.md
+!/.agents/skills/trellis-continue/
+!/.agents/skills/trellis-continue/**/
+!/.agents/skills/trellis-continue/**/*.md
+!/.agents/skills/trellis-finish-work/
+!/.agents/skills/trellis-finish-work/**/
+!/.agents/skills/trellis-finish-work/**/*.md
+!/.agents/skills/trellis-meta/
+!/.agents/skills/trellis-meta/**/
+!/.agents/skills/trellis-meta/**/*.md
+!/.agents/skills/trellis-session-insight/
+!/.agents/skills/trellis-session-insight/**/
+!/.agents/skills/trellis-session-insight/**/*.md
+!/.agents/skills/trellis-spec-bootstrap/
+!/.agents/skills/trellis-spec-bootstrap/**/
+!/.agents/skills/trellis-spec-bootstrap/**/*.md
+!/.agents/skills/trellis-start/
+!/.agents/skills/trellis-start/**/
+!/.agents/skills/trellis-start/**/*.md
+!/.agents/skills/trellis-update-spec/
+!/.agents/skills/trellis-update-spec/**/
+!/.agents/skills/trellis-update-spec/**/*.md
+
+# Trellis workflow/config/scripts/specs/tasks/journals are portable source.
+# Its nested .gitignore keeps identity/session/runtime state local.
 /.dsh/
-/.trellis/.gitignore
 /.trellis/.template-hashes.json
-/.trellis/.version
-/.trellis/agents/
-/.trellis/config.yaml
-/.trellis/scripts/
-/.trellis/spec/
-/.trellis/tasks/00-bootstrap-guidelines/
-/.trellis/workflow.md
-/.trellis/workspace/
+
+# Tool caches and generated native/package outputs, including nested packages.
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.gradle/
+**/.cxx/
+**/node_modules/
+**/target/
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.exe
+*.apk
+*.aab
+*.hap
+*.hsp
+*.ipa
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
+*.dmg
+*.msi
+*.pkg
+*.deb
+*.rpm
+
+# Local credentials and signing material, never portable project knowledge.
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+**/key.properties
+**/keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+*.provisionprofile
 
 # Local diagnostic exports and shell inspection fragments
 /_*.txt

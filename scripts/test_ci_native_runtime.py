@@ -125,6 +125,30 @@ class NativeArtifactsTest(unittest.TestCase):
                             {"compiler-build.json": record}, self.root / "output", "commit123")
         self.assertFalse(list((self.root / "output").glob("*.tar.gz")))
 
+    def test_changed_android_jni_library_cannot_create_success_archive(self):
+        for host, abi in (("aarch64-linux-android", "arm64-v8a"),
+                          ("x86_64-linux-android", "x86_64")):
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
+                self.root = Path(temporary)
+                package, _, library, record = self.fixture(host)
+                original = library.read_bytes()
+                expected_hash = sha256(library)
+                installed = package / "android/app/src/main/jniLibs" / abi / library.name
+                # Preserve the size so only the copied JNI library's hash can reject it.
+                installed.write_bytes(b"\0" * len(original))
+                self.assertEqual(installed.stat().st_size, library.stat().st_size)
+                self.assertNotEqual(sha256(installed), expected_hash)
+                self.assertEqual(library.read_bytes(), original)
+                output = self.root / "output"
+                with mock.patch("ci_native_runtime.archive_tree") as archive, \
+                        self.assertRaisesRegex(ValueError, "library changed before archive") as raised:
+                    collect_package(package, host, {"compiler-build.json": record}, output, "commit123")
+                self.assertIn("jniLibs", str(raised.exception))
+                archive.assert_not_called()
+                self.assertFalse(list(output.glob("*.tar.gz")))
+                self.assertFalse(list(output.glob("*.tar.gz.sha256")))
+                self.assertEqual(sha256(library), expected_hash)
+
     def test_mobile_layouts_restore_platform_packaging_inputs(self):
         for host, native_path, manifest in [
             ("aarch64-linux-android", "android/app/src/main/jniLibs/arm64-v8a/libqfli_miri.so",

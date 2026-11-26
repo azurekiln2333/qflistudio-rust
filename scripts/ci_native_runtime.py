@@ -188,11 +188,15 @@ def collect_package(package_root, host, records, output, commit):
         if sha256(source) != row["sha256"] or source.stat().st_size != row["size"]:
             raise ValueError(f"Generated asset changed before archive: {name}")
         shutil.copy2(source, assets / name)
+    native_directories = [payload / native_relative]
+    if platform == "android":
+        native_directories.append(payload / android_relative)
     for row in manifest["nativeLibraries"]:
         relative = row.get("path", row.get("name"))
-        library = native / relative
-        if sha256(library) != row["sha256"] or ("size" in row and library.stat().st_size != row["size"]):
-            raise ValueError(f"Generated native library changed before archive: {relative}")
+        for directory in native_directories:
+            library = directory / relative
+            if sha256(library) != row["sha256"] or ("size" in row and library.stat().st_size != row["size"]):
+                raise ValueError(f"Generated native library changed before archive: {library.relative_to(payload)}")
     include = payload / "native/include"
     include.mkdir(parents=True)
     for name in ("qfli_miri.h", "qfli_debug.h"):

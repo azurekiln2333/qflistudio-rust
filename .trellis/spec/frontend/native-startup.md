@@ -1,5 +1,9 @@
 # Native Startup
 
+All new builds/tests/validation run only on GitHub-hosted runners under
+[Cloud-only workspace](../guides/cloud-only-workspace.md). Historical results
+below retain their original date and do not authorize local reruns.
+
 ## 1. Scope / Trigger
 
 OHOS startup crosses Dart, the platform channel and ArkUI. Follow the native
@@ -80,19 +84,12 @@ and the native ArkTS compile passed. Device checks remain paused by the user.
 flutter test --no-pub test/native_startup_test.dart --reporter expanded
 ```
 
-For ArkTS compilation, run from `ohos/` with the local DevEco JBR and SDK:
-
-```powershell
-$env:JAVA_HOME = 'D:/ProgramFiles/Huawei/DevEco Studio/jbr'
-$env:DEVECO_SDK_HOME = 'D:/ProgramFiles/Huawei/DevEco Studio/sdk'
-& 'D:/ProgramFiles/Huawei/DevEco Studio/tools/node/node.exe' `
-  'D:/ProgramFiles/Huawei/DevEco Studio/tools/hvigor/bin/hvigorw.js' `
-  --mode module -p product=default -p module=entry@default `
-  -p buildMode=debug default@CompileArkTS --no-daemon
-```
-
-The task name must be `default@CompileArkTS`; bare `CompileArkTS` does not
-resolve in this project. This compile does not sign, install or validate a HAP.
+For a new ArkTS compilation, provision the compatible JBR, Node and OHOS SDK
+in a GitHub-hosted job and invoke Hvigor from that runner's `ohos/` checkout.
+Do not copy historical machine-specific DevEco paths into local commands.
+The task name is `default@CompileArkTS`; bare `CompileArkTS` does not resolve
+in this project. Record the hosted SDK/Flutter identities and job outcome.
+This compile does not sign, install or validate a HAP.
 
 ## 7. Wrong vs Correct
 

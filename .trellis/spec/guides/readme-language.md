@@ -18,7 +18,8 @@ characters and explanations at most 40. Do not join actions with semicolons.
 Remove nominalized actions, stock phrases, marketing claims and vague words.
 Retain modal words such as 可能 and 也许: they express confidence.
 
-Run the mechanical check first:
+Run the mechanical check first on a GitHub-hosted Actions runner, never locally
+(see [Cloud-only workspace](./cloud-only-workspace.md)):
 
 ```text
 python scripts/ste-lint-zh.py README.md README.zh-TW.md

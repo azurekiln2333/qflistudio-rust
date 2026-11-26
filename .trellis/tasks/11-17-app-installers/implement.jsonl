@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/github-native-builds.md", "reason": "Runtime artifact names, archive layout and CI contracts the installer workflow consumes"}
+{"file": ".trellis/spec/backend/native-runtime.md", "reason": "Native packaging and manifest contracts for embedded mobile runtimes"}

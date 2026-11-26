@@ -1,5 +1,10 @@
 # Embedded Rust Runtime
 
+All build, packaging, test, installation and verification commands below are
+GitHub-hosted runner procedures under
+[Cloud-only workspace](../guides/cloud-only-workspace.md), not local commands.
+Device-only evidence remains pending if no permitted hosted path is available.
+
 ## 1. Scope / Trigger
 
 Apply this contract when editing `native/miri_adapter/`, its upstream patch,
@@ -116,14 +121,15 @@ restore them in `finally` after verification.
   must explicitly release its window, or authorize a delegate to release it.
   A worker reporting no device use within its own scope cannot release another
   coordinator's active tests. Resolve conflicting claims before device changes.
-- Serialize Flutter pub, tests and builds within this workspace. They rewrite
+- Serialize Flutter pub, tests and builds within each hosted job workspace.
+  Never execute them in a local editing clone. They rewrite
   plugin metadata/registrants; concurrent integration and release preparation
   can leave a release registrant referencing the dev-only integration plugin.
   Regenerate through the normal release build with pub enabled. Do not patch
   generated registrants or the SDK to hide inconsistent build preparation.
 - Hvigor `-p enableSignTask=false` and this Flutter fork's `--no-codesign` do
   not disable the HAP signing task. Use typed `-c properties.enableSignTask=false`
-  or the temporary local config above for an unsigned compilation check.
+  or the temporary runner-workspace config above for an unsigned compilation check.
   Never replace the Rust application ID or credentials with another product's
   profile to make installation succeed.
 - HDC installation requires checking the textual device result as well as its

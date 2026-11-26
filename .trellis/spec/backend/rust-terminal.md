@@ -1,5 +1,10 @@
 # Rust Terminal Commands
 
+Development builds/tests run only on GitHub-hosted runners under
+[Cloud-only workspace](../guides/cloud-only-workspace.md). The desktop Cargo
+behavior described below is a shipped product capability, not permission to
+run development builds in a local editing clone.
+
 ## 1. Scope / Trigger
 
 Apply when changing `rust_terminal_commands.dart`, desktop compiler execution,

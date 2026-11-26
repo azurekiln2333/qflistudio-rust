@@ -3,6 +3,8 @@
 The application delegates shared UI and storage to `qfli_studio_core` and owns
 Rust compilation, native source execution, process lifecycle and packaging here.
 Read the contract for the layer being changed before implementing it.
+Read [Cloud-only workspace](../guides/cloud-only-workspace.md) first: all
+executable checks/builds run only on GitHub-hosted runners, not this checkout.
 
 | Guide | Scope |
 | --- | --- |
@@ -16,6 +18,7 @@ Read the contract for the layer being changed before implementing it.
 | [Rust Terminal](./rust-terminal.md) | Shared delegates, offline Cargo and real process execution |
 
 For quality verification, run Dart analysis and the relevant real compiler
-regressions, then the complete root Flutter suite. Native packaging checks and
+regressions, then the complete root Flutter suite on GitHub-hosted runners.
+Record actual run/job evidence; missing hosted checks remain pending. Native packaging checks and
 platform builds are separate from source execution evidence. Keep all shared
 core changes coordinated with the current owner and avoid sibling product edits.

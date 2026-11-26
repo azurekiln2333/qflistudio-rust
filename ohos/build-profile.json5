@@ -1,37 +1,9 @@
 {
   "app": {
-    "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_5Gogu8dDP-VUDl7tf8iZSa46_X9zXNB7J6kns596-PU=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001A4A593A8BE4574C84D63A5E74EEECA3DB6A2F84E5C2315781ED3A03B113E57A4EF54A495B4758",
-          "profile": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_5Gogu8dDP-VUDl7tf8iZSa46_X9zXNB7J6kns596-PU=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_5Gogu8dDP-VUDl7tf8iZSa46_X9zXNB7J6kns596-PU=.p12",
-          "storePassword": "0000001AA31144EE72754C9F3BC1FE72C37BE90B4DDBE080EC10580EB3224D00322BF8F7DEC1C67FE4CF"
-        }
-      },
-      {
-        "name": "releaseKey",
-        "type": "HarmonyOS",
-        "material": {
-          "storeFile": "D:/Keystore/suanxiwanjie.p12",
-          "storePassword": "000000203FB996974D4ACDC85E1C53C506F0872481C17BC901E514F1205D4CF20626248692646B0C498E6E883646264C",
-          "keyAlias": "suanxiwanjie",
-          "keyPassword": "00000020531BB6349A004B31E182D5E447DC893C3299DB6D8C52ED3E87265BD8D4C7BF9BB546382C90339EFF0B1A3D46",
-          "signAlg": "SHA256withECDSA",
-          "profile": "D:/Keystore/Profile/rustcoreRelease.p7b",
-          "certpath": "D:/Keystore/suanxiwanjie_release.cer"
-        }
-      }
-    ],
+    "signingConfigs": [],
     "products": [
       {
         "name": "default",
-        "signingConfig": "default",
         "compatibleSdkVersion": "5.1.0(18)",
         "runtimeOS": "HarmonyOS",
         "targetSdkVersion": "6.1.1(24)"

@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
 
   qfli_studio_core:
-    path: ../qfli_studio_core
+    path: ../qflistudio-core
 
   path: ^1.9.1
   ffi: ^2.2.0
@@ -20,7 +20,7 @@ dependencies:
 
 dependency_overrides:
   re_editor:
-    path: ../qfli_studio_core/vendor/re_editor
+    path: ../qflistudio-core/vendor/re_editor
 
 dev_dependencies:
   integration_test:

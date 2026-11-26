@@ -1,0 +1,29 @@
+{
+  "id": "github-workspace-migration",
+  "name": "github-workspace-migration",
+  "title": "GitHub migration and cloud-only Rust workspace",
+  "description": "Synchronize Rust source and Trellis progress to GitHub, consolidate branches, audit six-platform cloud builds, compare the E drive clone, and hand over through herdr.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lichengyu",
+  "assignee": "lichengyu",
+  "createdAt": "2026-11-26",
+  "completedAt": null,
+  "branch": "main",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-17-app-installers",
+    "11-17-github-native-build"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
