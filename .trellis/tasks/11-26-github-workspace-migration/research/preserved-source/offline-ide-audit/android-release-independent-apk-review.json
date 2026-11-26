@@ -1,0 +1,79 @@
+{
+  "apk": "D:\\MyNewProjects\\qfli_rust\\build\\app\\outputs\\flutter-apk\\app-release.apk",
+  "bytes": 98915757,
+  "sha256": "3e404c0b4be439747533f398cdfcd1704c68183a5e00ba43ade881c138d1c398",
+  "duplicateNames": false,
+  "nativeLibraries": [
+    {
+      "path": "lib/arm64-v8a/libapp.so",
+      "bytes": 12846000,
+      "sha256": "3e49655ba7597bcc1f41b3a66891aebb57e8a1f51d44b5bf6984b331be866912",
+      "machine": 183
+    },
+    {
+      "path": "lib/arm64-v8a/libflutter.so",
+      "bytes": 11317744,
+      "sha256": "0c56c4a468224beb2336c7bacaee6d5885047a0075d613fe421871b4dceafdce",
+      "machine": 183
+    },
+    {
+      "path": "lib/arm64-v8a/libqfli_miri.so",
+      "bytes": 17300072,
+      "sha256": "6c280fc7c89d1dc55e99a8145621ee030a74ebd531d95afd9f82ce59d4bf6714",
+      "machine": 183,
+      "manifestMatch": true
+    },
+    {
+      "path": "lib/arm64-v8a/librustc_codegen_cranelift-1.98.1.so",
+      "bytes": 16029192,
+      "sha256": "df5f3ec456552481927a0ccbd4740f9725b68d4cfa4b5612ff89cdcb89923a74",
+      "machine": 183,
+      "manifestMatch": true
+    },
+    {
+      "path": "lib/arm64-v8a/librustc_driver-af75d9896e427335.so",
+      "bytes": 150422552,
+      "sha256": "da5268ce3e1a85f7e65057fdbbdfb7b8cca882c4fd6b7a45a62dc6994d2e0c87",
+      "machine": 183,
+      "manifestMatch": true
+    }
+  ],
+  "runtimeAssets": [],
+  "errors": [],
+  "kernelBlobPresent": false,
+  "packagedManifestMatchesLocal": true,
+  "runtimeRecordsChecked": 97,
+  "nativeManifestRecordsChecked": 3,
+  "ok": true,
+  "manifestElements": [
+    {
+      "tag": "manifest",
+      "attributes": {
+        "versionCode": 1000000,
+        "versionName": "1.0.0",
+        "compileSdkVersion": 36,
+        "compileSdkVersionCodename": "16",
+        "package": "com.azurekiln.qfli.rustcore",
+        "platformBuildVersionCode": 36,
+        "platformBuildVersionName": 16
+      }
+    },
+    {
+      "tag": "uses-permission",
+      "attributes": {
+        "name": "com.azurekiln.qfli.rustcore.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+      }
+    },
+    {
+      "tag": "application",
+      "attributes": {
+        "label": "QFLIRustCore",
+        "icon": 2131361792,
+        "name": "android.app.Application",
+        "extractNativeLibs": true,
+        "appComponentFactory": "androidx.core.app.CoreComponentFactory"
+      }
+    }
+  ],
+  "applicationDebuggable": false
+}

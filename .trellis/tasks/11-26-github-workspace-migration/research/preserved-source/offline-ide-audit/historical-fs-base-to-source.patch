@@ -1,0 +1,1179 @@
+diff --git a/build/offline-ide-audit/fs-patch-base/src/alloc/alloc_bytes.rs b/build/offline-ide-audit/fs-patch-source/src/alloc/alloc_bytes.rs
+index 5d00d3e..4d3fd82 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/alloc/alloc_bytes.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/alloc/alloc_bytes.rs
+@@ -13,6 +13,7 @@ use crate::helpers::ToU64 as _;
+ #[derive(Clone, Debug)]
+ pub enum MiriAllocParams {
+     Global,
++    Embedded(std::sync::Arc<dyn crate::EmbeddedSession>),
+     Isolated(Rc<RefCell<IsolatedAlloc>>),
+ }
+ 
+@@ -54,6 +55,10 @@ impl Drop for MiriAllocBytes {
+         unsafe {
+             match self.params.clone() {
+                 MiriAllocParams::Global => alloc::dealloc(self.ptr, alloc_layout),
++                MiriAllocParams::Embedded(session) => {
++                    alloc::dealloc(self.ptr, alloc_layout);
++                    session.release_memory(alloc_layout.size());
++                }
+                 MiriAllocParams::Isolated(alloc) =>
+                     alloc.borrow_mut().dealloc(self.ptr, alloc_layout),
+             }
+@@ -95,8 +100,16 @@ impl MiriAllocBytes {
+         // When size is 0 we allocate 1 byte anyway, to ensure each allocation has a unique address.
+         let alloc_layout =
+             if size == 0 { Layout::from_size_align(1, align).unwrap() } else { layout };
++        if let MiriAllocParams::Embedded(session) = &params {
++            if !session.reserve_memory(alloc_layout.size()) {
++                std::panic::resume_unwind(Box::new(rustc_errors::FatalErrorMarker));
++            }
++        }
+         let ptr = alloc_fn(alloc_layout, &params);
+         if ptr.is_null() {
++            if let MiriAllocParams::Embedded(session) = &params {
++                session.release_memory(alloc_layout.size());
++            }
+             Err(())
+         } else {
+             // SAFETY: All `MiriAllocBytes` invariants are fulfilled.
+@@ -119,7 +132,7 @@ impl AllocBytes for MiriAllocBytes {
+         // SAFETY: `alloc_fn` will only be used with `size != 0`.
+         let alloc_fn = |layout, params: &MiriAllocParams| unsafe {
+             match params {
+-                MiriAllocParams::Global => alloc::alloc(layout),
++                MiriAllocParams::Global | MiriAllocParams::Embedded(_) => alloc::alloc(layout),
+                 MiriAllocParams::Isolated(alloc) => alloc.borrow_mut().alloc(layout),
+             }
+         };
+@@ -139,7 +152,7 @@ impl AllocBytes for MiriAllocBytes {
+         // SAFETY: `alloc_fn` will only be used with `size != 0`.
+         let alloc_fn = |layout, params: &MiriAllocParams| unsafe {
+             match params {
+-                MiriAllocParams::Global => alloc::alloc_zeroed(layout),
++                MiriAllocParams::Global | MiriAllocParams::Embedded(_) => alloc::alloc_zeroed(layout),
+                 MiriAllocParams::Isolated(alloc) => alloc.borrow_mut().alloc_zeroed(layout),
+             }
+         };
+diff --git a/build/offline-ide-audit/fs-patch-base/src/diagnostics.rs b/build/offline-ide-audit/fs-patch-source/src/diagnostics.rs
+index 25bbe36..c8157df 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/diagnostics.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/diagnostics.rs
+@@ -488,7 +488,11 @@ pub fn report_result<'tcx>(
+         &ecx.machine,
+     );
+ 
+-    eprint!("{extra}"); // newlines are already in the string
++    if let Some(session) = &ecx.machine.embedded_session {
++        let _ignore = session.write_output(true, extra.as_bytes());
++    } else {
++        eprint!("{extra}"); // newlines are already in the string
++    }
+ 
+     // Include a note like `std` does when we omit frames from a backtrace
+     if pruned {
+diff --git a/build/offline-ide-audit/fs-patch-source/src/embedded_fs.rs b/build/offline-ide-audit/fs-patch-source/src/embedded_fs.rs
+new file mode 100644
+index 0000000..fd7260c
+--- /dev/null
++++ b/build/offline-ide-audit/fs-patch-source/src/embedded_fs.rs
+@@ -0,0 +1,393 @@
++//! Explicit, per-interpreter local filesystem capability for embedded hosts.
++//!
++//! The root is chosen by the embedding application, never by a guest environment
++//! variable. Linux/Android/OHOS lookups walk pinned directory descriptors without
++//! following symlinks. Other hosts fail closed until they provide equivalent APIs.
++use std::fs::{self, File, Metadata, OpenOptions, ReadDir};
++use std::io::{self, ErrorKind};
++use std::path::{Component, Path, PathBuf};
++use std::sync::Mutex;
++use std::sync::atomic::{AtomicU64, Ordering};
++
++#[derive(Debug)]
++pub struct EmbeddedFileSystem {
++    root: PathBuf,
++    root_dir: File,
++    cwd: Mutex<PathBuf>,
++    temporary: PathBuf,
++    temporary_dir: Option<File>,
++}
++
++static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(1);
++
++fn denied() -> io::Error {
++    io::Error::new(ErrorKind::PermissionDenied, "path is outside the embedded project or uses a symlink")
++}
++
++impl EmbeddedFileSystem {
++    /// Authorize one existing project directory. The application must select this
++    /// directory explicitly, and must not pass a runtime/sysroot or ambient cwd.
++    /// The returned temporary directory is fresh and belongs to this capability.
++    pub fn new(root: &Path) -> io::Result<Self> {
++        if !root.is_absolute() { return Err(denied()); }
++        let root = fs::canonicalize(root)?;
++        if root.parent().is_none() { return Err(denied()); }
++        let root_dir = open_root(&root)?;
++        let mut fs = Self {
++            cwd: Mutex::new(PathBuf::new()),
++            temporary: PathBuf::new(),
++            temporary_dir: None,
++            root,
++            root_dir,
++        };
++        // Do not reuse another session's directory, even after a process restart.
++        loop {
++            let id = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
++            let name = PathBuf::from(format!(".qfli-miri-tmp-{id}"));
++            match fs.create_dir(&name, 0o700) {
++                Ok(()) => {
++                    let directory = match fs.directory(&name) {
++                        Ok(directory) => directory,
++                        Err(error) => {
++                            // No guest can run yet. Roll back only the empty
++                            // entry just created, never recursively remove it.
++                            if let Ok(parent) = descriptor_path(&fs.root_dir) {
++                                let _ = fs::remove_dir(parent.join(&name));
++                            }
++                            return Err(error);
++                        }
++                    };
++                    fs.temporary_dir = Some(directory);
++                    fs.temporary = fs.root.join(name);
++                    break;
++                }
++                Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
++                Err(error) => return Err(error),
++            }
++        }
++        Ok(fs)
++    }
++
++    pub fn root(&self) -> &Path { &self.root }
++    pub fn temporary_dir(&self) -> &Path { &self.temporary }
++
++    pub fn current_dir(&self) -> io::Result<PathBuf> {
++        let cwd = self.cwd.lock().map_err(|_| io::Error::other("embedded cwd lock poisoned"))?;
++        Ok(if cwd.as_os_str().is_empty() {
++            self.root.clone()
++        } else {
++            self.root.join(&*cwd)
++        })
++    }
++
++    pub fn set_current_dir(&self, path: &Path) -> io::Result<()> {
++        let relative = self.relative(path)?;
++        // Validate the complete directory before changing only our session state.
++        let _directory = self.directory(&relative)?;
++        *self.cwd.lock().map_err(|_| io::Error::other("embedded cwd lock poisoned"))? = relative;
++        Ok(())
++    }
++
++    fn relative(&self, path: &Path) -> io::Result<PathBuf> {
++        if path.as_os_str().is_empty() { return Err(io::Error::from(ErrorKind::NotFound)); }
++        let mut result;
++        let tail;
++        if path.is_absolute() {
++            result = PathBuf::new();
++            tail = path.strip_prefix(&self.root).map_err(|_| denied())?;
++        } else {
++            result = self.cwd.lock().map_err(|_| io::Error::other("embedded cwd lock poisoned"))?.clone();
++            tail = path;
++        }
++        for component in tail.components() {
++            match component {
++                Component::Normal(name) => result.push(name),
++                Component::CurDir => {},
++                Component::ParentDir => { if !result.pop() { return Err(denied()); } },
++                Component::RootDir | Component::Prefix(_) => return Err(denied()),
++            }
++        }
++        Ok(result)
++    }
++
++    fn directory(&self, relative: &Path) -> io::Result<File> {
++        let mut directory = self.root_dir.try_clone()?;
++        for component in relative.components() {
++            let Component::Normal(name) = component else { return Err(denied()); };
++            directory = open_directory_at(&directory, name)?;
++        }
++        Ok(directory)
++    }
++
++    fn parent(&self, path: &Path) -> io::Result<GuardedPath> {
++        let relative = self.relative(path)?;
++        let Some(name) = relative.file_name() else { return Err(denied()); };
++        let parent = relative.parent().unwrap_or(Path::new(""));
++        let directory = self.directory(parent)?;
++        GuardedPath::new(directory, name)
++    }
++
++    pub(crate) fn open(&self, path: &Path, mut options: OpenOptions) -> io::Result<File> {
++        let guarded = self.parent(path)?;
++        // O_NONBLOCK prevents a pre-existing FIFO from blocking the interpreter.
++        // O_NOFOLLOW is required on the final component as well as each parent.
++        set_no_follow(&mut options)?;
++        let file = options.open(&guarded.path)?;
++        let ty = file.metadata()?.file_type();
++        if !ty.is_file() && !ty.is_dir() { return Err(denied()); }
++        Ok(file)
++    }
++
++    pub(crate) fn metadata(&self, path: &Path, follow_symlink: bool) -> io::Result<Metadata> {
++        let relative = self.relative(path)?;
++        if relative.as_os_str().is_empty() { return self.root_dir.metadata(); }
++        let guarded = self.parent(path)?;
++        let file = metadata_file(&guarded)?;
++        let metadata = file.metadata()?;
++        let ty = metadata.file_type();
++        if ty.is_symlink() {
++            if follow_symlink { return Err(denied()); }
++        } else if !ty.is_file() && !ty.is_dir() {
++            return Err(denied());
++        }
++        Ok(metadata)
++    }
++
++    pub(crate) fn create_dir(&self, path: &Path, mode: u32) -> io::Result<()> {
++        let guarded = self.parent(path)?;
++        #[cfg_attr(not(unix), allow(unused_mut))]
++        let mut builder = fs::DirBuilder::new();
++        #[cfg(unix)] { use std::os::unix::fs::DirBuilderExt; builder.mode(mode & 0o777); }
++        #[cfg(not(unix))] let _ = mode;
++        builder.create(&guarded.path)
++    }
++
++    pub(crate) fn remove_file(&self, path: &Path) -> io::Result<()> {
++        let guarded = self.parent(path)?;
++        fs::remove_file(&guarded.path)
++    }
++
++    pub(crate) fn remove_dir(&self, path: &Path) -> io::Result<()> {
++        let guarded = self.parent(path)?;
++        fs::remove_dir(&guarded.path)
++    }
++
++    pub(crate) fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
++        let from = self.parent(from)?;
++        let to = self.parent(to)?;
++        // rename/unlink never dereference the final directory entry.
++        fs::rename(&from.path, &to.path)
++    }
++
++    pub(crate) fn read_dir(&self, path: &Path) -> io::Result<ReadDir> {
++        let directory = self.directory(&self.relative(path)?)?;
++        // read_dir opens its own descriptor while `directory` is still alive.
++        // DirEntry metadata uses that retained descriptor, never a guest path.
++        fs::read_dir(descriptor_path(&directory)?)
++    }
++
++    pub(crate) fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
++        let relative = self.relative(path)?;
++        self.metadata(path, true)?;
++        Ok(self.root.join(relative))
++    }
++}
++
++impl Drop for EmbeddedFileSystem {
++    fn drop(&mut self) {
++        // Keep the created directory alive so its identity cannot be reused.
++        // A guest may rename it and replace the old name with ordinary data.
++        // Never chase a renamed temporary or recursively delete its replacement.
++        // Drop follows interpreter exit; external concurrent host renames are
++        // outside this per-interpreter capability's namespace guarantees.
++        if let Some(owned) = &self.temporary_dir {
++            if let Ok(guarded) = self.parent(&self.temporary) {
++                if let Ok(current) = metadata_file(&guarded) {
++                    if same_directory(owned, &current).unwrap_or(false) {
++                        let _ = fs::remove_dir_all(&guarded.path);
++                    }
++                }
++            }
++        }
++    }
++}
++
++#[cfg(any(target_os = "linux", target_os = "android"))]
++fn same_directory(owned: &File, current: &File) -> io::Result<bool> {
++    use std::os::unix::fs::MetadataExt;
++    let owned = owned.metadata()?;
++    let current = current.metadata()?;
++    Ok(current.is_dir() && owned.dev() == current.dev() && owned.ino() == current.ino())
++}
++#[cfg(not(any(target_os = "linux", target_os = "android")))]
++fn same_directory(_owned: &File, _current: &File) -> io::Result<bool> { Ok(false) }
++
++/// Retains the parent descriptor until the host operation is complete. The only
++/// symlink followed here is the kernel's own /proc/self/fd entry for that pinned
++/// descriptor, not a guest-controlled filesystem entry.
++struct GuardedPath { _directory: File, path: PathBuf }
++impl GuardedPath {
++    fn new(directory: File, name: &std::ffi::OsStr) -> io::Result<Self> {
++        let path = descriptor_path(&directory)?.join(name);
++        Ok(Self { _directory: directory, path })
++    }
++}
++
++#[cfg(any(target_os = "linux", target_os = "android"))]
++fn descriptor_path(file: &File) -> io::Result<PathBuf> {
++    use std::os::fd::AsRawFd;
++    Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())))
++}
++#[cfg(not(any(target_os = "linux", target_os = "android")))]
++fn descriptor_path(_file: &File) -> io::Result<PathBuf> {
++    Err(io::Error::new(ErrorKind::Unsupported, "embedded filesystem requires descriptor-relative host access"))
++}
++
++#[cfg(any(target_os = "linux", target_os = "android"))]
++fn open_root(path: &Path) -> io::Result<File> {
++    use std::os::unix::fs::OpenOptionsExt;
++    OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW).open(path)
++}
++#[cfg(not(any(target_os = "linux", target_os = "android")))]
++fn open_root(_path: &Path) -> io::Result<File> { Err(io::Error::from(ErrorKind::Unsupported)) }
++
++#[cfg(any(target_os = "linux", target_os = "android"))]
++fn open_directory_at(directory: &File, name: &std::ffi::OsStr) -> io::Result<File> {
++    use std::ffi::CString;
++    use std::os::fd::{AsRawFd, FromRawFd};
++    use std::os::unix::ffi::OsStrExt;
++    let name = CString::new(name.as_bytes()).map_err(|_| denied())?;
++    // SAFETY: directory is live, name is NUL-terminated, and ownership of a
++    // successful new descriptor is immediately transferred to File.
++    let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(),
++        libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW) };
++    if fd < 0 { return Err(io::Error::last_os_error()); }
++    Ok(unsafe { File::from_raw_fd(fd) })
++}
++#[cfg(not(any(target_os = "linux", target_os = "android")))]
++fn open_directory_at(_directory: &File, _name: &std::ffi::OsStr) -> io::Result<File> {
++    Err(io::Error::from(ErrorKind::Unsupported))
++}
++
++#[cfg(any(target_os = "linux", target_os = "android"))]
++fn set_no_follow(options: &mut OpenOptions) -> io::Result<()> {
++    use std::os::unix::fs::OpenOptionsExt;
++    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
++    Ok(())
++}
++#[cfg(not(any(target_os = "linux", target_os = "android")))]
++fn set_no_follow(_options: &mut OpenOptions) -> io::Result<()> { Err(io::Error::from(ErrorKind::Unsupported)) }
++
++#[cfg(any(target_os = "linux", target_os = "android"))]
++fn metadata_file(guarded: &GuardedPath) -> io::Result<File> {
++    use std::os::unix::fs::OpenOptionsExt;
++    OpenOptions::new().read(true).custom_flags(libc::O_PATH | libc::O_NOFOLLOW).open(&guarded.path)
++}
++#[cfg(not(any(target_os = "linux", target_os = "android")))]
++fn metadata_file(_guarded: &GuardedPath) -> io::Result<File> { Err(io::Error::from(ErrorKind::Unsupported)) }
++
++#[cfg(all(test, any(target_os = "linux", target_os = "android")))]
++mod tests {
++    use super::*;
++    use std::io::{Read, Write};
++    use std::os::unix::fs::symlink;
++
++    struct Fixture(PathBuf);
++    impl Fixture {
++        fn new() -> Self {
++            let id = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
++            let path = std::env::temp_dir().join(format!("qfli-embedded-fs-test-{}-{id}", std::process::id()));
++            fs::create_dir(&path).unwrap();
++            Self(path)
++        }
++    }
++    impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
++
++    #[test]
++    fn real_roundtrip_keeps_host_cwd_and_creates_unique_local_temporary_dirs() {
++        let fixture = Fixture::new();
++        let original_cwd = std::env::current_dir().unwrap();
++        let first = EmbeddedFileSystem::new(&fixture.0).unwrap();
++        let second = EmbeddedFileSystem::new(&fixture.0).unwrap();
++        assert_ne!(first.temporary_dir(), second.temporary_dir());
++        assert!(first.temporary_dir().starts_with(&fixture.0));
++        first.create_dir(Path::new("work"), 0o700).unwrap();
++        first.set_current_dir(Path::new("work")).unwrap();
++        assert_eq!(first.current_dir().unwrap(), fixture.0.join("work"));
++        assert_eq!(second.current_dir().unwrap().as_os_str(), fixture.0.as_os_str());
++        assert_eq!(std::env::current_dir().unwrap(), original_cwd);
++        let second_temporary = second.temporary_dir().to_owned();
++        drop(second);
++        assert!(!second_temporary.exists());
++        assert!(first.temporary_dir().is_dir());
++        let mut options = OpenOptions::new();
++        options.write(true).create_new(true);
++        let mut file = first.open(Path::new("hello.txt"), options).unwrap();
++        file.write_all("你好\n".as_bytes()).unwrap();
++        file.sync_all().unwrap();
++        drop(file);
++        first.rename(Path::new("hello.txt"), Path::new("renamed.txt")).unwrap();
++        let mut options = OpenOptions::new(); options.read(true);
++        let mut contents = String::new();
++        first.open(Path::new("renamed.txt"), options).unwrap().read_to_string(&mut contents).unwrap();
++        assert_eq!(contents, "你好\n");
++        assert_eq!(first.metadata(Path::new("renamed.txt"), true).unwrap().len(), 7);
++        let entries = first.read_dir(Path::new(".")).unwrap().collect::<io::Result<Vec<_>>>().unwrap();
++        assert_eq!(entries.len(), 1);
++        assert_eq!(entries[0].file_name(), "renamed.txt");
++        first.remove_file(Path::new("renamed.txt")).unwrap();
++        first.set_current_dir(Path::new("..")).unwrap();
++        assert_eq!(first.current_dir().unwrap().as_os_str(), fixture.0.as_os_str());
++        first.remove_dir(Path::new("work")).unwrap();
++    }
++
++    #[test]
++    fn cleanup_preserves_replacement_directory_and_symlink() {
++        for replace_with_symlink in [false, true] {
++            let fixture = Fixture::new();
++            let sandbox = EmbeddedFileSystem::new(&fixture.0).unwrap();
++            let temporary = sandbox.temporary_dir().to_owned();
++            let moved = fixture.0.join("renamed-temporary");
++            let ordinary = fixture.0.join("ordinary");
++            fs::write(temporary.join("owned.txt"), b"owned").unwrap();
++            fs::create_dir(&ordinary).unwrap();
++            fs::write(ordinary.join("keep.txt"), b"ordinary-project-data").unwrap();
++            sandbox.rename(&temporary, &moved).unwrap();
++            if replace_with_symlink {
++                symlink(&ordinary, &temporary).unwrap();
++            } else {
++                sandbox.rename(&ordinary, &temporary).unwrap();
++            }
++            drop(sandbox);
++            assert_eq!(fs::read(temporary.join("keep.txt")).unwrap(), b"ordinary-project-data");
++            assert_eq!(fs::read(moved.join("owned.txt")).unwrap(), b"owned");
++        }
++    }
++
++    #[test]
++    fn refuses_parent_absolute_and_both_leaf_and_intermediate_symlink_escapes() {
++        let fixture = Fixture::new();
++        let project = fixture.0.join("project");
++        let outside = fixture.0.join("outside");
++        fs::create_dir(&project).unwrap();
++        fs::create_dir(&outside).unwrap();
++        fs::write(outside.join("secret.txt"), b"unchanged").unwrap();
++        symlink(&outside, project.join("escape")).unwrap();
++        symlink(outside.join("secret.txt"), project.join("leaf")).unwrap();
++        let sandbox = EmbeddedFileSystem::new(&project).unwrap();
++        for path in [Path::new("../outside/secret.txt"), outside.as_path(), Path::new("escape/secret.txt"), Path::new("leaf")] {
++            let mut options = OpenOptions::new(); options.read(true).write(true).truncate(true);
++            assert!(sandbox.open(path, options).is_err(), "allowed {}", path.display());
++            assert!(sandbox.canonicalize(path).is_err(), "canonicalized {}", path.display());
++        }
++        assert!(sandbox.create_dir(Path::new("escape/new"), 0o700).is_err());
++        assert!(sandbox.rename(Path::new("leaf"), Path::new("../moved")).is_err());
++        assert!(sandbox.set_current_dir(Path::new("escape")).is_err());
++        assert_eq!(fs::read(outside.join("secret.txt")).unwrap(), b"unchanged");
++        assert!(!outside.join("new").exists());
++        assert!(sandbox.metadata(Path::new("leaf"), false).unwrap().file_type().is_symlink());
++        // Unlinking a symlink removes the project entry, never its target.
++        sandbox.remove_file(Path::new("leaf")).unwrap();
++        assert_eq!(fs::read(outside.join("secret.txt")).unwrap(), b"unchanged");
++    }
++}
+diff --git a/build/offline-ide-audit/fs-patch-base/src/eval.rs b/build/offline-ide-audit/fs-patch-source/src/eval.rs
+index 19b6ff7..d0eeece 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/eval.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/eval.rs
+@@ -89,6 +89,20 @@ pub fn entry_fn(tcx: TyCtxt<'_>) -> (DefId, MiriEntryFnType) {
+ /// will hang the program.
+ const MAIN_THREAD_YIELDS_AT_SHUTDOWN: u32 = 256;
+ 
++/// Per-interpreter host I/O and cooperative execution control for embedding.
++pub trait EmbeddedSession: std::fmt::Debug + Send + Sync {
++    fn read_stdin(&self, buffer: &mut [u8]) -> std::io::Result<usize>;
++    fn write_output(&self, stderr: bool, buffer: &[u8]) -> std::io::Result<usize>;
++    /// Return false to stop at the current MIR basic-block terminator.
++    fn before_basic_block(&self) -> bool;
++    fn reserve_memory(&self, bytes: usize) -> bool;
++    fn release_memory(&self, bytes: usize);
++    /// Explicit local project access. Absence preserves ordinary Miri isolation.
++    fn filesystem(&self) -> Option<&crate::EmbeddedFileSystem> { None }
++    /// Optional wall clock capability, independent of filesystem/network access.
++    fn system_time(&self) -> Option<std::time::SystemTime> { None }
++}
++
+ /// Configuration needed to spawn a Miri instance.
+ #[derive(Clone)]
+ pub struct MiriConfig {
+@@ -172,6 +186,8 @@ pub struct MiriConfig {
+     pub short_fd_operations: bool,
+     /// A list of crates that are considered user-relevant.
+     pub user_relevant_crates: Vec<String>,
++    /// Optional session-local hooks; CLI behavior is unchanged when absent.
++    pub embedded_session: Option<std::sync::Arc<dyn EmbeddedSession>>,
+ }
+ 
+ impl Default for MiriConfig {
+@@ -215,6 +231,7 @@ impl Default for MiriConfig {
+             float_rounding_error: FloatRoundingErrorMode::Random,
+             short_fd_operations: true,
+             user_relevant_crates: vec![],
++            embedded_session: None,
+         }
+     }
+ }
+diff --git a/build/offline-ide-audit/fs-patch-base/src/lib.rs b/build/offline-ide-audit/fs-patch-source/src/lib.rs
+index 9b5573b..5e33584 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/lib.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/lib.rs
+@@ -90,6 +90,7 @@ mod clock;
+ mod concurrency;
+ mod data_structures;
+ mod diagnostics;
++mod embedded_fs;
+ mod eval;
+ mod helpers;
+ mod intrinsics;
+@@ -156,7 +157,8 @@ pub use crate::data_structures::mono_hash_map::MonoHashMap;
+ pub use crate::diagnostics::{
+     EvalContextExt as _, NonHaltingDiagnostic, TerminationInfo, report_result,
+ };
+-pub use crate::eval::{MiriConfig, MiriEntryFnType, create_ecx, entry_fn, eval_entry};
++pub use crate::embedded_fs::EmbeddedFileSystem;
++pub use crate::eval::{EmbeddedSession, MiriConfig, MiriEntryFnType, create_ecx, entry_fn, eval_entry};
+ pub use crate::helpers::{EvalContextExt as _, ToU64 as _, ToUsize as _};
+ pub use crate::intrinsics::EvalContextExt as _;
+ pub use crate::machine::{
+diff --git a/build/offline-ide-audit/fs-patch-base/src/machine.rs b/build/offline-ide-audit/fs-patch-source/src/machine.rs
+index 80f3923..7e73e2d 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/machine.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/machine.rs
+@@ -490,6 +490,8 @@ pub struct MiriMachine<'tcx> {
+     // We carry a copy of the global `TyCtxt` for convenience, so methods taking just `&Evaluator` have `tcx` access.
+     pub tcx: TyCtxt<'tcx>,
+ 
++    pub(crate) embedded_session: Option<std::sync::Arc<dyn crate::EmbeddedSession>>,
++
+     /// Global data for borrow tracking.
+     pub borrow_tracker: Option<borrow_tracker::GlobalState>,
+ 
+@@ -757,6 +759,7 @@ impl<'tcx> MiriMachine<'tcx> {
+ 
+         MiriMachine {
+             tcx,
++            embedded_session: config.embedded_session.clone(),
+             borrow_tracker,
+             data_race,
+             alloc_addresses,
+@@ -915,6 +918,10 @@ impl<'tcx> MiriMachine<'tcx> {
+         ecx.machine.extern_statics.try_insert(Symbol::intern(name), ptr).unwrap();
+     }
+ 
++    pub(crate) fn embedded_filesystem(&self) -> Option<&crate::EmbeddedFileSystem> {
++        self.embedded_session.as_ref().and_then(|session| session.filesystem())
++    }
++
+     pub(crate) fn communicate(&self) -> bool {
+         self.isolated_op == IsolatedOp::Allow
+     }
+@@ -1019,6 +1026,7 @@ impl VisitProvenance for MiriMachine<'_> {
+     fn visit_provenance(&self, visit: &mut VisitWith<'_>) {
+         #[rustfmt::skip]
+         let MiriMachine {
++            embedded_session: _,
+             threads,
+             thread_cpu_affinity: _,
+             tls,
+@@ -1784,6 +1792,12 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
+     }
+ 
+     fn before_terminator(ecx: &mut InterpCx<'tcx, Self>) -> InterpResult<'tcx> {
++        if let Some(session) = &ecx.machine.embedded_session {
++            if !session.before_basic_block() {
++                ecx.machine.handle_abnormal_termination();
++                throw_machine_stop!(TerminationInfo::Interrupted);
++            }
++        }
+         ecx.machine.basic_block_count += 1u64; // a u64 that is only incremented by 1 will "never" overflow
+         ecx.machine.since_gc += 1;
+         // Possibly report our progress. This will point at the terminator we are about to execute.
+@@ -1981,7 +1995,9 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
+ 
+         match &self.allocator {
+             Some(alloc) => MiriAllocParams::Isolated(alloc.clone()),
+-            None => MiriAllocParams::Global,
++            None => self.embedded_session.as_ref().map_or(
++                MiriAllocParams::Global, |session| MiriAllocParams::Embedded(session.clone()),
++            ),
+         }
+     }
+ 
+diff --git a/build/offline-ide-audit/fs-patch-base/src/shims/env.rs b/build/offline-ide-audit/fs-patch-source/src/shims/env.rs
+index cfc94ab..da35d81 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/shims/env.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/shims/env.rs
+@@ -48,6 +48,11 @@ impl<'tcx> EnvVars<'tcx> {
+             env_vars.insert(OsString::from(name), OsString::from(value));
+         }
+ 
++        if let Some(fs) = ecx.machine.embedded_filesystem() {
++            // Only this explicitly chosen local path, never the host TMPDIR.
++            env_vars.insert(OsString::from("TMPDIR"), fs.temporary_dir().as_os_str().to_owned());
++        }
++
+         let env_vars = if ecx.target_os_is_unix() {
+             EnvVars::Unix(UnixEnvVars::new(ecx, env_vars)?)
+         } else if ecx.tcx.sess.target.os == Os::Windows {
+diff --git a/build/offline-ide-audit/fs-patch-base/src/shims/files.rs b/build/offline-ide-audit/fs-patch-source/src/shims/files.rs
+index 25dca7b..737799e 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/shims/files.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/shims/files.rs
+@@ -264,6 +264,10 @@ impl FileDescription for io::Stdin {
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
++        if let Some(session) = ecx.machine.embedded_session.clone() {
++            let result = ecx.read_from_host(|buf| session.read_stdin(buf), len, ptr)?;
++            return finish.call(ecx, result);
++        }
+         if !communicate_allowed {
+             // We want isolation mode to be deterministic, so we have to disallow all reads, even stdin.
+             helpers::isolation_abort_error("`read` from stdin")?;
+@@ -288,6 +292,21 @@ impl FileDescription for io::Stdin {
+     }
+ }
+ 
++struct SessionOutput {
++    session: std::sync::Arc<dyn crate::EmbeddedSession>,
++    stderr: bool,
++}
++
++impl io::Write for SessionOutput {
++    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
++        self.session.write_output(self.stderr, buffer)
++    }
++
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(())
++    }
++}
++
+ impl FileDescription for io::Stdout {
+     fn name(&self) -> &'static str {
+         "stdout"
+@@ -301,6 +320,10 @@ impl FileDescription for io::Stdout {
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
++        if let Some(session) = ecx.machine.embedded_session.clone() {
++            let result = ecx.write_to_host(SessionOutput { session, stderr: false }, len, ptr)?;
++            return finish.call(ecx, result);
++        }
+         // We allow writing to stdout even with isolation enabled.
+         let result = ecx.write_to_host(&*self, len, ptr)?;
+         // Stdout is buffered, flush to make sure it appears on the
+@@ -349,6 +372,10 @@ impl FileDescription for io::Stderr {
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
++        if let Some(session) = ecx.machine.embedded_session.clone() {
++            let result = ecx.write_to_host(SessionOutput { session, stderr: true }, len, ptr)?;
++            return finish.call(ecx, result);
++        }
+         // We allow writing to stderr even with isolation enabled.
+         let result = ecx.write_to_host(&*self, len, ptr)?;
+         // No need to flush, stderr is not buffered.
+@@ -363,6 +390,7 @@ impl FileDescription for io::Stderr {
+ #[derive(Debug)]
+ pub struct FileHandle {
+     pub(crate) file: File,
++    pub(crate) sandboxed: bool,
+     pub(crate) readable: bool,
+     pub(crate) writable: bool,
+ }
+@@ -380,7 +408,7 @@ impl FileDescription for FileHandle {
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
+-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
++        assert!(communicate_allowed || self.sandboxed, "file was not authorized by a local capability");
+ 
+         if !self.readable {
+             return finish.call(ecx, Err(ErrorKind::PermissionDenied.into()));
+@@ -399,7 +427,7 @@ impl FileDescription for FileHandle {
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
+-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
++        assert!(communicate_allowed || self.sandboxed, "file was not authorized by a local capability");
+ 
+         if !self.writable {
+             // Linux hosts return EBADF here which we can't translate via the platform-independent
+@@ -419,7 +447,7 @@ impl FileDescription for FileHandle {
+         communicate_allowed: bool,
+         offset: SeekFrom,
+     ) -> InterpResult<'tcx, io::Result<u64>> {
+-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
++        assert!(communicate_allowed || self.sandboxed, "file was not authorized by a local capability");
+         interp_ok((&mut &self.file).seek(offset))
+     }
+ 
+@@ -429,7 +457,7 @@ impl FileDescription for FileHandle {
+         communicate_allowed: bool,
+         _ecx: &mut MiriInterpCx<'tcx>,
+     ) -> InterpResult<'tcx, io::Result<()>> {
+-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
++        assert!(communicate_allowed || self.sandboxed, "file was not authorized by a local capability");
+         // We sync the file if it was opened in a mode different than read-only.
+         if self.writable {
+             // `File::sync_all` does the checks that are done when closing a file. We do this to
+diff --git a/build/offline-ide-audit/fs-patch-base/src/shims/foreign_items.rs b/build/offline-ide-audit/fs-patch-source/src/shims/foreign_items.rs
+index 5fd8676..24cd949 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/shims/foreign_items.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/shims/foreign_items.rs
+@@ -507,11 +507,15 @@ trait EvalContextExtPriv<'tcx>: crate::MiriInterpCxExt<'tcx> {
+                 let msg = this.read_immediate(msg)?;
+                 let msg = this.read_byte_slice(&msg)?;
+                 // Note: we're ignoring errors writing to host stdout/stderr.
+-                let _ignore = match link_name.as_str() {
+-                    "miri_write_to_stdout" => std::io::stdout().write_all(msg),
+-                    "miri_write_to_stderr" => std::io::stderr().write_all(msg),
+-                    _ => unreachable!(),
+-                };
++                if let Some(session) = &this.machine.embedded_session {
++                    let _ignore = session.write_output(link_name.as_str() == "miri_write_to_stderr", msg);
++                } else {
++                    let _ignore = match link_name.as_str() {
++                        "miri_write_to_stdout" => std::io::stdout().write_all(msg),
++                        "miri_write_to_stderr" => std::io::stderr().write_all(msg),
++                        _ => unreachable!(),
++                    };
++                }
+             }
+             // Promises that a pointer has a given symbolic alignment.
+             "miri_promise_symbolic_alignment" => {
+diff --git a/build/offline-ide-audit/fs-patch-base/src/shims/time.rs b/build/offline-ide-audit/fs-patch-source/src/shims/time.rs
+index acc0d5b..dc09195 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/shims/time.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/shims/time.rs
+@@ -72,8 +72,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+ 
+         let duration = match this.parse_clockid(clk_id) {
+             Some(TimeoutClock::RealTime) => {
+-                this.check_no_isolation("`clock_gettime` with `REALTIME` clocks")?;
+-                system_time_to_duration(&SystemTime::now())?
++                let time = this.machine.embedded_session.as_ref().and_then(|s| s.system_time());
++                let time = match time {
++                    Some(time) => time,
++                    None => {
++                        this.check_no_isolation("`clock_gettime` with `REALTIME` clocks")?;
++                        SystemTime::now()
++                    }
++                };
++                system_time_to_duration(&time)?
+             }
+             Some(TimeoutClock::Monotonic) =>
+                 this.machine
+@@ -102,7 +109,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let this = self.eval_context_mut();
+ 
+         this.assert_target_os_is_unix("gettimeofday");
+-        this.check_no_isolation("`gettimeofday`")?;
++        let time = this.machine.embedded_session.as_ref().and_then(|s| s.system_time());
++        let time = match time {
++            Some(time) => time,
++            None => {
++                this.check_no_isolation("`gettimeofday`")?;
++                SystemTime::now()
++            }
++        };
+ 
+         let tv = this.deref_pointer_as(tv_op, this.libc_ty_layout("timeval"))?;
+ 
+@@ -112,7 +126,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             return this.set_errno_and_return_neg1_i32(LibcError("EINVAL"));
+         }
+ 
+-        let duration = system_time_to_duration(&SystemTime::now())?;
++        let duration = system_time_to_duration(&time)?;
+         let tv_sec = duration.as_secs();
+         let tv_usec = duration.subsec_micros();
+ 
+diff --git a/build/offline-ide-audit/fs-patch-base/src/shims/unix/env.rs b/build/offline-ide-audit/fs-patch-source/src/shims/unix/env.rs
+index bd82b1e..fb93f9f 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/shims/unix/env.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/shims/unix/env.rs
+@@ -199,14 +199,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let buf = this.read_pointer(buf_op)?;
+         let size = this.read_target_usize(size_op)?;
+ 
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`getcwd`", reject_with)?;
+             this.set_last_error(ErrorKind::PermissionDenied)?;
+             return interp_ok(Pointer::null());
+         }
+ 
+         // If we cannot get the current directory, we return null
+-        match env::current_dir() {
++        let cwd = match this.machine.embedded_filesystem() {
++            Some(fs) => fs.current_dir(),
++            None => env::current_dir(),
++        };
++        match cwd {
+             Ok(cwd) => {
+                 if this.write_path_to_c_str(&cwd, buf, size)?.0 {
+                     return interp_ok(buf);
+@@ -225,6 +231,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+ 
+         let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+ 
++        if let Some(fs) = this.machine.embedded_filesystem() {
++            let result = fs.set_current_dir(&path).map(|()| 0);
++            return interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?));
++        }
+         if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+             this.reject_in_isolation("`chdir`", reject_with)?;
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+diff --git a/build/offline-ide-audit/fs-patch-base/src/shims/unix/fs.rs b/build/offline-ide-audit/fs-patch-source/src/shims/unix/fs.rs
+index 659125f..a7f94e9 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/shims/unix/fs.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/shims/unix/fs.rs
+@@ -63,7 +63,7 @@ impl UnixFileDescription for FileHandle {
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
+-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
++        assert!(communicate_allowed || self.sandboxed, "file was not authorized by a local capability");
+         if !self.readable {
+             return finish.call(ecx, Err(LibcError("EBADF")));
+         }
+@@ -104,7 +104,7 @@ impl UnixFileDescription for FileHandle {
+         ecx: &mut MiriInterpCx<'tcx>,
+         finish: DynMachineCallback<'tcx, Result<usize, IoError>>,
+     ) -> InterpResult<'tcx> {
+-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
++        assert!(communicate_allowed || self.sandboxed, "file was not authorized by a local capability");
+         if !self.writable {
+             return finish.call(ecx, Err(LibcError("EBADF")));
+         }
+@@ -132,7 +132,7 @@ impl UnixFileDescription for FileHandle {
+         communicate_allowed: bool,
+         op: FlockOp,
+     ) -> InterpResult<'tcx, io::Result<()>> {
+-        assert!(communicate_allowed, "isolation should have prevented even opening a file");
++        assert!(communicate_allowed || self.sandboxed, "file was not authorized by a local capability");
+ 
+         use FlockOp::*;
+         // We must not block the interpreter loop, so we always `try_lock`.
+@@ -374,7 +374,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+ 
+         let path = this.read_path_from_c_str(path_raw)?;
+         // Files in `/proc` won't work properly.
+-        if matches!(this.tcx.sess.target.os, Os::Linux | Os::Android | Os::Illumos | Os::Solaris)
++        if this.machine.embedded_filesystem().is_none()
++            && matches!(this.tcx.sess.target.os, Os::Linux | Os::Android | Os::Illumos | Os::Solaris)
+             && path::absolute(&path).is_ok_and(|path| path.starts_with("/proc"))
+         {
+             this.machine.emit_diagnostic(NonHaltingDiagnostic::FileInProcOpened);
+@@ -498,14 +499,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         }
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`open`", reject_with)?;
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+         }
+ 
+-        let fd = options
+-            .open(path)
+-            .map(|file| this.machine.fds.insert_new(FileHandle { file, writable, readable }));
++        let sandboxed = this.machine.embedded_filesystem().is_some();
++        let file = match this.machine.embedded_filesystem() {
++            Some(fs) => fs.open(&path, options),
++            None => options.open(path),
++        };
++        let fd = file.map(|file| {
++            this.machine.fds.insert_new(FileHandle { file, sandboxed, writable, readable })
++        });
+ 
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(fd)?))
+     }
+@@ -555,12 +563,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`unlink`", reject_with)?;
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+         }
+ 
+-        let result = fs::remove_file(path).map(|_| 0);
++        let result = match this.machine.embedded_filesystem() {
++            Some(fs) => fs.remove_file(&path),
++            None => fs::remove_file(path),
++        }.map(|_| 0);
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+     }
+ 
+@@ -661,7 +674,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let path = this.read_path_from_c_str(path_scalar)?.into_owned();
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`stat`", reject_with)?;
+             return this.set_errno_and_return_neg1_i32(LibcError("EACCES"));
+         }
+@@ -690,7 +705,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let path = this.read_path_from_c_str(path_scalar)?.into_owned();
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`lstat`", reject_with)?;
+             return this.set_errno_and_return_neg1_i32(LibcError("EACCES"));
+         }
+@@ -716,7 +733,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let fd = this.read_scalar(fd_op)?.to_i32()?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`fstat`", reject_with)?;
+             // Set error code as "EBADF" (bad fd)
+             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+@@ -777,7 +796,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         }
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`statx`", reject_with)?;
+             let ecode = if path.is_absolute() || dirfd == this.eval_libc_i32("AT_FDCWD") {
+                 // since `path` is provided, either absolute or
+@@ -960,7 +981,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             // path-only file.
+             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+         }
+-        assert!(this.machine.communicate(), "isolation should have prevented even opening a file");
++        assert!(this.machine.communicate() || file.sandboxed, "file was not authorized by a local capability");
+ 
+         let permissions = this.host_permissions_from_mode(mode.try_into().unwrap())?;
+         if let Err(err) = file.file.set_permissions(permissions) {
+@@ -988,12 +1009,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let newpath = this.read_path_from_c_str(newpath_ptr)?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`rename`", reject_with)?;
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+         }
+ 
+-        let result = fs::rename(oldpath, newpath).map(|_| 0);
++        let result = match this.machine.embedded_filesystem() {
++            Some(fs) => fs.rename(&oldpath, &newpath),
++            None => fs::rename(oldpath, newpath),
++        }.map(|_| 0);
+ 
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+     }
+@@ -1011,7 +1037,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`mkdir`", reject_with)?;
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+         }
+@@ -1027,7 +1055,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             builder.mode(mode);
+         }
+ 
+-        let result = builder.create(path).map(|_| 0i32);
++        let result = match this.machine.embedded_filesystem() {
++            Some(fs) => fs.create_dir(&path, mode),
++            None => builder.create(path),
++        }.map(|_| 0i32);
+ 
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+     }
+@@ -1038,12 +1069,17 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`rmdir`", reject_with)?;
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+         }
+ 
+-        let result = fs::remove_dir(path).map(|_| 0i32);
++        let result = match this.machine.embedded_filesystem() {
++            Some(fs) => fs.remove_dir(&path),
++            None => fs::remove_dir(path),
++        }.map(|_| 0i32);
+ 
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+     }
+@@ -1054,13 +1090,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let name = this.read_path_from_c_str(this.read_pointer(name_op)?)?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`opendir`", reject_with)?;
+             this.set_last_error(LibcError("EACCES"))?;
+             return interp_ok(Scalar::null_ptr(this));
+         }
+ 
+-        let result = fs::read_dir(name);
++        let result = match this.machine.embedded_filesystem() {
++            Some(fs) => fs.read_dir(&name),
++            None => fs::read_dir(name),
++        };
+ 
+         match result {
+             Ok(dir_iter) => {
+@@ -1091,7 +1132,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let dirp = this.read_target_usize(dirp_op)?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`readdir`", reject_with)?;
+             this.set_last_error(LibcError("EBADF"))?;
+             this.write_null(dest)?;
+@@ -1222,7 +1265,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let result_place = this.deref_pointer_as(result_op, this.machine.layouts.mut_raw_ptr)?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`readdir_r`", reject_with)?;
+             // Return error code, do *not* set `errno`.
+             return interp_ok(this.eval_libc("EBADF"));
+@@ -1296,7 +1341,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let dirp = this.read_target_usize(dirp_op)?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`closedir`", reject_with)?;
+             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+         }
+@@ -1328,7 +1375,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             // man page says "EBADF or EINVAL", Linux seems to use EINVAL.
+             return this.set_errno_and_return_neg1_i32(LibcError("EINVAL"));
+         }
+-        assert!(this.machine.communicate(), "isolation should have prevented even opening a file");
++        assert!(this.machine.communicate() || file.sandboxed, "file was not authorized by a local capability");
+ 
+         if let Ok(length) = length.try_into() {
+             let result = file.file.set_len(length);
+@@ -1419,7 +1466,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let file = fd.downcast::<FileHandle>().ok_or_else(|| {
+             err_unsup_format!("`fsync` is only supported on file-backed file descriptors")
+         })?;
+-        assert!(this.machine.communicate(), "isolation should have prevented even opening a file");
++        assert!(this.machine.communicate() || file.sandboxed, "file was not authorized by a local capability");
+ 
+         let io_result = maybe_sync_file(&file.file, file.writable, File::sync_all);
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(io_result)?))
+@@ -1437,7 +1484,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let file = fd.downcast::<FileHandle>().ok_or_else(|| {
+             err_unsup_format!("`fdatasync` is only supported on file-backed file descriptors")
+         })?;
+-        assert!(this.machine.communicate(), "isolation should have prevented even opening a file");
++        assert!(this.machine.communicate() || file.sandboxed, "file was not authorized by a local capability");
+ 
+         let io_result = maybe_sync_file(&file.file, file.writable, File::sync_data);
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(io_result)?))
+@@ -1474,7 +1521,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let file = fd.downcast::<FileHandle>().ok_or_else(|| {
+             err_unsup_format!("`sync_data_range` is only supported on file-backed file descriptors")
+         })?;
+-        assert!(this.machine.communicate(), "isolation should have prevented even opening a file");
++        assert!(this.machine.communicate() || file.sandboxed, "file was not authorized by a local capability");
+ 
+         let io_result = maybe_sync_file(&file.file, file.writable, File::sync_data);
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(io_result)?))
+@@ -1555,13 +1602,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let processed_ptr = this.read_pointer(processed_path_op)?;
+ 
+         // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op
++            && this.machine.embedded_filesystem().is_none()
++        {
+             this.reject_in_isolation("`realpath`", reject_with)?;
+             this.set_last_error(LibcError("EACCES"))?;
+             return interp_ok(Scalar::from_target_usize(0, this));
+         }
+ 
+-        let result = std::fs::canonicalize(pathname);
++        let result = match this.machine.embedded_filesystem() {
++            Some(fs) => fs.canonicalize(&pathname),
++            None => std::fs::canonicalize(pathname),
++        };
+         match result {
+             Ok(resolved) => {
+                 let path_max = this
+@@ -1703,6 +1755,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+                 Ok(f) => {
+                     let fd = this.machine.fds.insert_new(FileHandle {
+                         file: f,
++                        sandboxed: false,
+                         writable: true,
+                         readable: true,
+                     });
+@@ -1799,8 +1852,11 @@ impl FileMetadata {
+         path: &Path,
+         follow_symlink: bool,
+     ) -> InterpResult<'tcx, Result<FileMetadata, IoError>> {
+-        let metadata =
+-            if follow_symlink { std::fs::metadata(path) } else { std::fs::symlink_metadata(path) };
++        let metadata = match ecx.machine.embedded_filesystem() {
++            Some(fs) => fs.metadata(path, follow_symlink),
++            None if follow_symlink => std::fs::metadata(path),
++            None => std::fs::symlink_metadata(path),
++        };
+ 
+         FileMetadata::from_meta(ecx, metadata)
+     }
+diff --git a/build/offline-ide-audit/fs-patch-base/src/shims/windows/fs.rs b/build/offline-ide-audit/fs-patch-source/src/shims/windows/fs.rs
+index 6c5610e..6aff3d2 100644
+--- a/build/offline-ide-audit/fs-patch-base/src/shims/windows/fs.rs
++++ b/build/offline-ide-audit/fs-patch-source/src/shims/windows/fs.rs
+@@ -315,6 +315,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+                 }
+                 let fd_num = this.machine.fds.insert_new(FileHandle {
+                     file,
++                    sandboxed: false,
+                     writable: desired_write,
+                     readable: desired_read,
+                 });

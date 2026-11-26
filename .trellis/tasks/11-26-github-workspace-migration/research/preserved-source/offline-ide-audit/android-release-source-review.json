@@ -1,0 +1,136 @@
+{
+  "kind": "android-source-preflight",
+  "architectures": {
+    "arm64": {
+      "manifestIdentity": {
+        "schemaVersion": 2,
+        "platform": "android",
+        "architecture": "arm64",
+        "rustVersion": "1.98.1",
+        "rustCommit": "48a229ceaefd4985c50990b14116b6d856af0985",
+        "nativeHost": "aarch64-linux-android",
+        "guestTarget": "x86_64-unknown-linux-gnu"
+      },
+      "nativeLibraries": [
+        {
+          "name": "libqfli_miri.so",
+          "bytes": 17300072,
+          "sha256": "6c280fc7c89d1dc55e99a8145621ee030a74ebd531d95afd9f82ce59d4bf6714",
+          "manifestMatch": true,
+          "machine": 183,
+          "loadAlignments": [
+            16384,
+            16384,
+            16384,
+            16384
+          ],
+          "load16KiBAligned": true,
+          "qfliExports": [
+            "qfli_miri_abi_version",
+            "qfli_miri_cancel",
+            "qfli_miri_copy_output",
+            "qfli_miri_create",
+            "qfli_miri_create_with_backend",
+            "qfli_miri_destroy",
+            "qfli_miri_result",
+            "qfli_miri_run"
+          ]
+        },
+        {
+          "name": "librustc_codegen_cranelift-1.98.1.so",
+          "bytes": 16029192,
+          "sha256": "df5f3ec456552481927a0ccbd4740f9725b68d4cfa4b5612ff89cdcb89923a74",
+          "manifestMatch": true,
+          "machine": 183,
+          "loadAlignments": [
+            16384,
+            16384,
+            16384,
+            16384
+          ],
+          "load16KiBAligned": true
+        },
+        {
+          "name": "librustc_driver-af75d9896e427335.so",
+          "bytes": 150422552,
+          "sha256": "da5268ce3e1a85f7e65057fdbbdfb7b8cca882c4fd6b7a45a62dc6994d2e0c87",
+          "manifestMatch": true,
+          "machine": 183,
+          "loadAlignments": [
+            16384,
+            16384,
+            16384,
+            16384
+          ],
+          "load16KiBAligned": true
+        }
+      ]
+    },
+    "x64": {
+      "manifestIdentity": {
+        "schemaVersion": 2,
+        "platform": "android",
+        "architecture": "x64",
+        "rustVersion": "1.98.1",
+        "rustCommit": "48a229ceaefd4985c50990b14116b6d856af0985",
+        "nativeHost": "x86_64-linux-android",
+        "guestTarget": "x86_64-unknown-linux-gnu"
+      },
+      "nativeLibraries": [
+        {
+          "name": "libqfli_miri.so",
+          "bytes": 18212808,
+          "sha256": "c569b9feee05764798c1e05d6c7d6a88cd00f2ce7a1341e9a6e0327ced84f66b",
+          "manifestMatch": true,
+          "machine": 62,
+          "loadAlignments": [
+            16384,
+            16384,
+            16384,
+            16384
+          ],
+          "load16KiBAligned": true,
+          "qfliExports": [
+            "qfli_miri_abi_version",
+            "qfli_miri_cancel",
+            "qfli_miri_copy_output",
+            "qfli_miri_create",
+            "qfli_miri_create_with_backend",
+            "qfli_miri_destroy",
+            "qfli_miri_result",
+            "qfli_miri_run"
+          ]
+        },
+        {
+          "name": "librustc_codegen_cranelift-1.98.1.so",
+          "bytes": 15808104,
+          "sha256": "d0a26d9f8816db4ac2b61b7d13b897e45d6bada0b1293eacd6a0375e1b949d03",
+          "manifestMatch": true,
+          "machine": 62,
+          "loadAlignments": [
+            16384,
+            16384,
+            16384,
+            16384
+          ],
+          "load16KiBAligned": true
+        },
+        {
+          "name": "librustc_driver-25d2b895ad23529d.so",
+          "bytes": 144326392,
+          "sha256": "fed4bde2acfef6e9bf1a306fcd9babf354658a33b0aff333f44b4b8b66f310dc",
+          "manifestMatch": true,
+          "machine": 62,
+          "loadAlignments": [
+            16384,
+            16384,
+            16384,
+            16384
+          ],
+          "load16KiBAligned": true
+        }
+      ]
+    }
+  },
+  "limitations": []
+}

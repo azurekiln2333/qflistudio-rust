@@ -216,3 +216,38 @@ objects. No blob matched a current index path. The observed metadata was:
 These are classifications, not content provenance. Preserve the objects until
 coordinator review determines whether any unique source or evidence needs a
 tracked copy. No prune, repack, reflog rewrite or other object mutation ran.
+
+## Resolution note — 2026-11-27
+
+The earlier pending source/blob/log rescue items above describe their inspection
+snapshots, not the final rescue status. The authorized rescue is now completed
+and documented in
+`.trellis/tasks/11-26-github-workspace-migration/research/preservation-rescue.md`.
+Its exact source/object mappings, raw SHA-256 hashes, duplicate references and
+exclusion dispositions are in
+`.trellis/tasks/11-26-github-workspace-migration/research/preserved-source/manifest.json`.
+This note does not repeat or replace that ledger.
+
+The rescue preserved 119 unique exact-byte historical files. All 14 original
+unreachable blobs are accounted for: eleven received portable copies and three
+matched exact stage-0 index content during the later rescue comparison. That
+later comparison used a different index snapshot from the earlier statement
+that no blob matched a current index path. The original observations above
+remain unchanged. The tentative JSON-like classification of `85773ae...` was
+refined to a Cargo/TOML manifest; descriptive names do not establish provenance.
+
+Authored helpers, source variants, patch endpoints and selected useful evidence
+from the three authorized generated roots now have portable copies or explicit
+duplicate mappings. Unchanged upstream pairs and generated/transient outputs
+were not bulk copied. All 33 ignored release logs were reviewed and hashed;
+portable sanitized knowledge is recorded in
+`.trellis/tasks/11-26-github-workspace-migration/research/preserved-source/historical-log-summary.md`.
+Raw logs, original source files and original Git objects remain intact.
+
+Rescue completion does not authorize cleanup or establish current check passes.
+The rescue report retains provenance, excluded-record, secret-review, cloud
+validation and receiving-clone gates. Receiver diagnostics remain only
+`Hook failed` / `hook exited with code 1`; no hook cause or repair is inferred.
+Worker A did not stage or commit this resolution note and ran no local
+executable checks. The coordinator committed the earlier preservation report as
+`c859677`.

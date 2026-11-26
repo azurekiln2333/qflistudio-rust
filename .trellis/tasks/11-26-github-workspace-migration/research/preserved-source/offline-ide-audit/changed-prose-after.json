@@ -1,0 +1,29 @@
+[
+  {
+    "path": "build/offline-ide-audit/changed-prose.md",
+    "line": 2,
+    "col": 145,
+    "rule": "synonym-rotation",
+    "severity": "hard",
+    "message": "同义轮换：异常×2、错误×2 混用。定一个名字全篇用它，建议「错误」。",
+    "match": "异常"
+  },
+  {
+    "path": "build/offline-ide-audit/changed-prose.md",
+    "line": 32,
+    "col": 58,
+    "rule": "synonym-rotation",
+    "severity": "hard",
+    "message": "同义轮换：运行×1、执行×5 混用。定一个名字全篇用它，建议「执行」。",
+    "match": "运行"
+  },
+  {
+    "path": "build/offline-ide-audit/changed-prose.md",
+    "line": 37,
+    "col": 26,
+    "rule": "synonym-rotation",
+    "severity": "hard",
+    "message": "同义轮换：校验×3、检查×2 混用。定一个名字全篇用它，建议「校验」。",
+    "match": "检查"
+  }
+]

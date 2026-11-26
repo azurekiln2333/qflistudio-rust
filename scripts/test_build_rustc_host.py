@@ -244,8 +244,8 @@ class NativeToolConfigurationTests(unittest.TestCase):
         args.dlltool = self.root / "local tools/dlltool.exe"
         args.dlltool.write_bytes(b"fixture dlltool")
         tools = bootstrap.windows_tools(args, args.native_host)
-        self.assertEqual(tools["linker"], args.cc.resolve())
-        self.assertEqual(tools["dlltool"], args.dlltool.resolve())
+        self.assertEqual(tools["linker"], args.cc.absolute())
+        self.assertEqual(tools["dlltool"], args.dlltool.absolute())
 
     def test_windows_target_rejects_cross_host(self):
         args = self.args("x86_64-pc-windows-gnu")
@@ -295,8 +295,8 @@ class NativeToolConfigurationTests(unittest.TestCase):
         self.config(args, tools)
         wrapper = tools["linker"].read_text()
         self.assertIn("--target=x86_64-unknown-linux-gnu", wrapper)
-        self.assertIn(str(self.local["ld_lld"].resolve()), wrapper)
-        self.assertEqual(tools["ar"], self.local["ar"].resolve())
+        self.assertIn(str(self.local["ld_lld"].absolute()), wrapper)
+        self.assertEqual(tools["ar"], self.local["ar"].absolute())
 
     def test_llvm_multicall_aliases_keep_the_selected_executable_name(self):
         for alias_name, target_name in (("ld.lld", "lld"), ("clang++", "clang"),
@@ -406,8 +406,8 @@ class NativeToolConfigurationTests(unittest.TestCase):
         (sdk / "llvm/bin/clang").unlink()
         args = self.args(host, sdk=sdk)
         tools = bootstrap.ohos_tools(args, "x86_64-unknown-linux-gnu")
-        self.assertIn(str(self.local["cc"].resolve()), tools["cc"].read_text())
-        self.assertEqual(tools["ar"], self.local["ar"].resolve())
+        self.assertIn(str(self.local["cc"].absolute()), tools["cc"].read_text())
+        self.assertEqual(tools["ar"], self.local["ar"].absolute())
 
     def test_ohos_ambiguous_resource_versions_require_explicit_selection(self):
         host = "x86_64-unknown-linux-ohos"

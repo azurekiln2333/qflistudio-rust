@@ -1,0 +1,28 @@
+[
+  {
+    "path": "D:\\ProgramFiles\\Huawei\\OpenHarmony\\Sdk\\23\\native\\sysroot\\usr\\lib\\aarch64-linux-ohos\\libc.so",
+    "bytes": 72144,
+    "sha256": "298fb33338d06f07552606ff1ef2adbe42202e4ced3ab9400f26fe90bc38887c",
+    "openat": {
+      "table": "SHT_DYNSYM",
+      "binding": "GLOBAL",
+      "type": "FUNC",
+      "section": 13,
+      "visibility": "DEFAULT"
+    },
+    "evidence": "Pure Python ELF64 little-endian table read. No SDK executable or native process invoked."
+  },
+  {
+    "path": "D:\\ProgramFiles\\Huawei\\OpenHarmony\\Sdk\\23\\native\\sysroot\\usr\\lib\\x86_64-linux-ohos\\libc.so",
+    "bytes": 84840,
+    "sha256": "7a176e07e120b888ed1547401134e84b385775f9312ae1d40112d8c2f9051a4a",
+    "openat": {
+      "table": "SHT_DYNSYM",
+      "binding": "GLOBAL",
+      "type": "FUNC",
+      "section": 12,
+      "visibility": "DEFAULT"
+    },
+    "evidence": "Pure Python ELF64 little-endian table read. No SDK executable or native process invoked."
+  }
+]

@@ -1,0 +1,52 @@
+{
+  "candidateFiles": [
+    "scripts/generate_rust_native_catalog.py",
+    "scripts/inspect_rust_catalog_hap.py",
+    "scripts/test_inspect_rust_catalog_hap.py",
+    "scripts/test_rust_native_catalog.py",
+    "tool/rust_content/topics_001_084.json",
+    "tool/rust_content/topics_085_166.json",
+    "assets/content_rust/examples.json",
+    "assets/content_rust/tutorials.json",
+    "assets/content_rust/native_catalog.json",
+    "native/miri_adapter/qfli_miri.h",
+    "native/miri_adapter/qfli_debug.h"
+  ],
+  "baseFromHEAD": [
+    "scripts/generate_rust_content.py",
+    "scripts/miri_build_support.py",
+    "scripts/package_miri_runtime.py",
+    "scripts/test_rust_content.py",
+    "scripts/verify_rust_content.py",
+    "native/patches/rustc-1.98.1-embedded-compiler-boundary.patch"
+  ],
+  "results": [
+    {
+      "command": [
+        "-m",
+        "unittest",
+        "test_inspect_rust_catalog_hap",
+        "test_rust_native_catalog",
+        "test_rust_content"
+      ],
+      "exit": 0,
+      "summary": "................................................................................................................................................\n----------------------------------------------------------------------\nRan 144 tests in 2.686s\n\nOK\n"
+    },
+    {
+      "command": [
+        "scripts/generate_rust_content.py",
+        "--check"
+      ],
+      "exit": 0,
+      "summary": "generation drift check"
+    },
+    {
+      "command": [
+        "scripts/generate_rust_native_catalog.py",
+        "--check"
+      ],
+      "exit": 0,
+      "summary": "generation drift check"
+    }
+  ]
+}

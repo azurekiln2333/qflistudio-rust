@@ -30,6 +30,10 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Preserve source bytes on Windows checkout
+        if: runner.os == 'Windows'
+        # Catalog provenance hashes the committed JSON bytes, not CRLF conversions.
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -48,6 +52,13 @@ jobs:
                   raise SystemExit(f'Missing fixture prerequisite: {name}')
           # Prevent the Cargo-prefetch regression silently skipping its real fixture.
           subprocess.run(['rustup', 'which', 'cargo'], check=True)
+          # Native catalog provenance includes raw authored-topic file hashes.
+          topics = subprocess.check_output(
+              ['git', 'ls-files', '-z', '--', 'tool/rust_content/*.json']).decode().split('\0')
+          for name in filter(None, topics):
+              committed = subprocess.check_output(['git', 'show', f'HEAD:{name}'])
+              if Path(name).read_bytes() != committed:
+                  raise SystemExit(f'Checkout changed hash-bound source bytes: {name}')
           Path(os.environ['RUNNER_TEMP'], 'qfli-check-results').mkdir()
           PY
       - name: Native helper, bootstrap, provenance and package regressions

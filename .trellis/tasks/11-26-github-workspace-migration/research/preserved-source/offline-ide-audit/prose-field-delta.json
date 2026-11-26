@@ -1,0 +1,269 @@
+{
+  "fields": [
+    {
+      "file": "tool/rust_content/topics_001_084.json",
+      "id": 13,
+      "field": "explain",
+      "before_chars": 293,
+      "after_chars": 400,
+      "kept": 0,
+      "added": 0,
+      "removed": 5,
+      "detail": [
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "41 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "83 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "passive-voice",
+          "severity": "advisory",
+          "match": "被使用"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        },
+        {
+          "direction": "removed",
+          "rule": "vague-word",
+          "severity": "advisory",
+          "match": "若干"
+        }
+      ],
+      "new_sentences": [
+        "性能测量最怕噪声与优化消除。"
+      ]
+    },
+    {
+      "file": "tool/rust_content/topics_001_084.json",
+      "id": 62,
+      "field": "explain",
+      "before_chars": 387,
+      "after_chars": 499,
+      "kept": 0,
+      "added": 0,
+      "removed": 1,
+      "detail": [
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        }
+      ],
+      "new_sentences": [
+        "在引用上匹配时存在“默认绑定模式”：匹配 `&T` 时绑定默认是引用（`ref`），匹配 `&mut T` 时默认是 `ref mut`，因此 `match &opt { Some(x) => ... }` 中 `x` 是 `&T`。"
+      ]
+    },
+    {
+      "file": "tool/rust_content/topics_085_166.json",
+      "id": 158,
+      "field": "explain",
+      "before_chars": 226,
+      "after_chars": 323,
+      "kept": 0,
+      "added": 0,
+      "removed": 3,
+      "detail": [
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "41 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "68 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        }
+      ],
+      "new_sentences": [
+        "调用或导出 C ABI 函数并不需要任何第三方 crate。"
+      ]
+    },
+    {
+      "file": "tool/rust_content/topics_085_166.json",
+      "id": 159,
+      "field": "explain",
+      "before_chars": 359,
+      "after_chars": 463,
+      "kept": 0,
+      "added": 0,
+      "removed": 3,
+      "detail": [
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "75 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "passive-voice",
+          "severity": "advisory",
+          "match": "被运行时捕获并"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        }
+      ],
+      "new_sentences": [
+        "要让 C 调用 Rust，函数需 #[unsafe(no_mangle)]（保持符号名）且 extern \"C\"（用 C ABI），并用 crate-type = [\"cdylib\"] 构建动态库（或 staticlib）。"
+      ]
+    },
+    {
+      "file": "tool/rust_content/topics_085_166.json",
+      "id": 161,
+      "field": "explain",
+      "before_chars": 195,
+      "after_chars": 319,
+      "kept": 0,
+      "added": 0,
+      "removed": 3,
+      "detail": [
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "49 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        }
+      ],
+      "new_sentences": [
+        "优化的第一步是测量，而不是凭直觉改代码。"
+      ]
+    },
+    {
+      "file": "tool/rust_content/topics_085_166.json",
+      "id": 166,
+      "field": "explain",
+      "before_chars": 809,
+      "after_chars": 928,
+      "kept": 0,
+      "added": 0,
+      "removed": 13,
+      "detail": [
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "41 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "43 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "52 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "long-sentence",
+          "severity": "hard",
+          "match": "66 字"
+        },
+        {
+          "direction": "removed",
+          "rule": "passive-voice",
+          "severity": "advisory",
+          "match": "被后续值覆盖"
+        },
+        {
+          "direction": "removed",
+          "rule": "passive-voice",
+          "severity": "advisory",
+          "match": "被安全忽略"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        },
+        {
+          "direction": "removed",
+          "rule": "semicolon",
+          "severity": "hard",
+          "match": "；"
+        },
+        {
+          "direction": "removed",
+          "rule": "synonym-rotation",
+          "severity": "hard",
+          "match": "清除"
+        }
+      ],
+      "new_sentences": [
+        "执行器拥有任务表和 ready 通道。"
+      ]
+    }
+  ],
+  "totals": {
+    "removed/hard/long-sentence": 10,
+    "removed/advisory/passive-voice": 4,
+    "removed/hard/semicolon": 12,
+    "removed/advisory/vague-word": 1,
+    "removed/hard/synonym-rotation": 1
+  }
+}

@@ -1,0 +1,543 @@
+diff --git a/native/build/.patchwork/a/src/eval.rs b/native/build/.patchwork/b/src/eval.rs
+index 63e5311..be1dedf 100644
+--- a/native/build/.patchwork/a/src/eval.rs
++++ b/native/build/.patchwork/b/src/eval.rs
+@@ -99,6 +99,30 @@ pub trait EmbeddedSession: std::fmt::Debug + Send + Sync {
+     fn release_memory(&self, bytes: usize);
+ }
+ 
++/// Local host resources granted to the interpreted program: one directory tree, a working
++/// directory, and a wall clock.
++///
++/// This is a *narrow* capability. Sockets, pipes, environment variables and every other kind of
++/// host communication stay governed by `IsolatedOp`; only path-based filesystem access, the
++/// program's own working directory, and the wall clock are served through this trait. Miri never
++/// widens isolation on its own: it asks the session, and a denial keeps the old error behavior.
++pub trait SandboxFs: std::fmt::Debug + Send + Sync {
++    /// Map a guest path (exactly as the program spelled it) to a host path.
++    ///
++    /// Returning `None` rejects the operation. Implementations must resolve `.` and `..`
++    /// lexically, interpret relative paths against [`SandboxFs::current_dir`], and refuse any path
++    /// whose canonical location leaves the sandbox root. Canonicalization must follow symlinks
++    /// (including the deepest existing ancestor of a file that is about to be created), so a link
++    /// that points outside the root is rejected at the moment it is used.
++    fn resolve(&self, guest_path: &std::ffi::OsStr) -> Option<std::path::PathBuf>;
++    /// The program's current directory, in guest namespace.
++    fn current_dir(&self) -> std::path::PathBuf;
++    /// Change the program's current directory. Session-local: the host process must not `chdir`.
++    fn set_current_dir(&self, guest_path: &std::ffi::OsStr) -> std::io::Result<()>;
++    /// Wall clock used for `CLOCK_REALTIME` and `gettimeofday`.
++    fn now(&self) -> std::time::SystemTime;
++}
++
+ /// Configuration needed to spawn a Miri instance.
+ #[derive(Clone)]
+ pub struct MiriConfig {
+@@ -184,6 +208,8 @@ pub struct MiriConfig {
+     pub user_relevant_crates: Vec<String>,
+     /// Optional session-local hooks; CLI behavior is unchanged when absent.
+     pub embedded_session: Option<std::sync::Arc<dyn EmbeddedSession>>,
++    /// Optional local filesystem and clock capability; CLI behavior is unchanged when absent.
++    pub sandbox_fs: Option<std::sync::Arc<dyn SandboxFs>>,
+ }
+ 
+ impl Default for MiriConfig {
+@@ -228,6 +254,7 @@ impl Default for MiriConfig {
+             short_fd_operations: true,
+             user_relevant_crates: vec![],
+             embedded_session: None,
++            sandbox_fs: None,
+         }
+     }
+ }
+diff --git a/native/build/.patchwork/a/src/helpers.rs b/native/build/.patchwork/b/src/helpers.rs
+index f5761f4..998a45b 100644
+--- a/native/build/.patchwork/a/src/helpers.rs
++++ b/native/build/.patchwork/b/src/helpers.rs
+@@ -605,6 +605,20 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         interp_ok(())
+     }
+ 
++    /// Returns `true` when host filesystem access is available.
++    ///
++    /// When it is not, this reports the very same isolation rejection that the individual shims
++    /// used to emit, so callers only have to supply their historical error value.
++    fn check_fs_access(&self, op_name: &str) -> InterpResult<'tcx, bool> {
++        if self.eval_context_ref().machine.host_fs_allowed() {
++            return interp_ok(true);
++        }
++        if let IsolatedOp::Reject(reject_with) = self.eval_context_ref().machine.isolated_op {
++            self.reject_in_isolation(op_name, reject_with)?;
++        }
++        interp_ok(false)
++    }
++
+     /// Helper function used inside the shims of foreign functions which reject the op
+     /// when isolation is enabled. It is used to print a warning/backtrace about the rejection.
+     fn reject_in_isolation(&self, op_name: &str, reject_with: RejectOpWith) -> InterpResult<'tcx> {
+diff --git a/native/build/.patchwork/a/src/lib.rs b/native/build/.patchwork/b/src/lib.rs
+index fb9ad88..2cd8d7a 100644
+--- a/native/build/.patchwork/a/src/lib.rs
++++ b/native/build/.patchwork/b/src/lib.rs
+@@ -156,7 +156,9 @@ pub use crate::data_structures::mono_hash_map::MonoHashMap;
+ pub use crate::diagnostics::{
+     EvalContextExt as _, NonHaltingDiagnostic, TerminationInfo, report_result,
+ };
+-pub use crate::eval::{EmbeddedSession, MiriConfig, MiriEntryFnType, create_ecx, entry_fn, eval_entry};
++pub use crate::eval::{
++    EmbeddedSession, MiriConfig, MiriEntryFnType, SandboxFs, create_ecx, entry_fn, eval_entry,
++};
+ pub use crate::helpers::{EvalContextExt as _, ToU64 as _, ToUsize as _};
+ pub use crate::intrinsics::EvalContextExt as _;
+ pub use crate::machine::{
+diff --git a/native/build/.patchwork/a/src/machine.rs b/native/build/.patchwork/b/src/machine.rs
+index fb28981..2bd6d0d 100644
+--- a/native/build/.patchwork/a/src/machine.rs
++++ b/native/build/.patchwork/b/src/machine.rs
+@@ -491,6 +491,7 @@ pub struct MiriMachine<'tcx> {
+     pub tcx: TyCtxt<'tcx>,
+ 
+     pub(crate) embedded_session: Option<std::sync::Arc<dyn crate::EmbeddedSession>>,
++    pub(crate) sandbox_fs: Option<std::sync::Arc<dyn crate::SandboxFs>>,
+ 
+     /// Global data for borrow tracking.
+     pub borrow_tracker: Option<borrow_tracker::GlobalState>,
+@@ -760,6 +761,7 @@ impl<'tcx> MiriMachine<'tcx> {
+         MiriMachine {
+             tcx,
+             embedded_session: config.embedded_session.clone(),
++            sandbox_fs: config.sandbox_fs.clone(),
+             borrow_tracker,
+             data_race,
+             alloc_addresses,
+@@ -922,6 +924,15 @@ impl<'tcx> MiriMachine<'tcx> {
+         self.isolated_op == IsolatedOp::Allow
+     }
+ 
++    /// Whether host filesystem access is available.
++    ///
++    /// True when isolation is fully disabled, or when an embedded session installed a sandbox
++    /// that vouches for individual paths. This is deliberately narrower than [`Self::communicate`]:
++    /// sockets, environment access and the rest keep following `communicate()`.
++    pub(crate) fn host_fs_allowed(&self) -> bool {
++        self.communicate() || self.sandbox_fs.is_some()
++    }
++
+     /// Check whether the stack frame that this `FrameInfo` refers to is part of a local crate.
+     pub(crate) fn is_local(&self, instance: ty::Instance<'tcx>) -> bool {
+         let def_id = instance.def_id();
+@@ -1023,6 +1034,7 @@ impl VisitProvenance for MiriMachine<'_> {
+         #[rustfmt::skip]
+         let MiriMachine {
+             embedded_session: _,
++            sandbox_fs: _,
+             threads,
+             thread_cpu_affinity: _,
+             tls,
+diff --git a/native/build/.patchwork/a/src/shims/os_str.rs b/native/build/.patchwork/b/src/shims/os_str.rs
+index 7de1e7e..3e43c5c 100644
+--- a/native/build/.patchwork/a/src/shims/os_str.rs
++++ b/native/build/.patchwork/b/src/shims/os_str.rs
+@@ -260,6 +260,32 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         this.alloc_os_str_as_wide_str(&os_str, memkind)
+     }
+ 
++    /// Read a path argument and translate it through the sandbox, when one is installed.
++    ///
++    /// Returns `None` when the operation must be rejected with `PermissionDenied`: either because
++    /// the sandbox refused the path, or because nothing grants host filesystem access. Without a
++    /// sandbox this reproduces the historical `IsolatedOp::Reject` behavior exactly.
++    fn sandboxed_path(
++        &mut self,
++        ptr: Pointer,
++        op_name: &str,
++    ) -> InterpResult<'tcx, Option<PathBuf>> {
++        let this = self.eval_context_mut();
++        // The guest spelling is the only faithful input here: target-to-host separator conversion
++        // would turn an absolute guest path into something the sandbox cannot interpret.
++        let guest = this.read_os_str_from_c_str(ptr)?.to_owned();
++        if let Some(sandbox) = this.machine.sandbox_fs.clone() {
++            return interp_ok(sandbox.resolve(&guest));
++        }
++        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
++            this.reject_in_isolation(op_name, reject_with)?;
++            return interp_ok(None);
++        }
++        let host =
++            this.convert_path(Cow::Borrowed(&guest), PathConversion::TargetToHost).into_owned();
++        interp_ok(Some(PathBuf::from(host)))
++    }
++
+     fn convert_path<'a>(
+         &self,
+         os_str: Cow<'a, OsStr>,
+diff --git a/native/build/.patchwork/a/src/shims/unix/fs.rs b/native/build/.patchwork/b/src/shims/unix/fs.rs
+index 659125f..2dd4564 100644
+--- a/native/build/.patchwork/a/src/shims/unix/fs.rs
++++ b/native/build/.patchwork/b/src/shims/unix/fs.rs
+@@ -497,15 +497,16 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             throw_unsup_format!("unsupported flags {:#x}", flag);
+         }
+ 
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`open`", reject_with)?;
++        // Resolve the path through the sandbox, if one is installed; otherwise fall back to the
++        // isolation gate that has always guarded host file access.
++        let sandboxed = this.machine.sandbox_fs.is_some();
++        let Some(path) = this.sandboxed_path(path_raw, "`open`")? else {
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+-        }
++        };
+ 
+         let fd = options
+             .open(path)
+-            .map(|file| this.machine.fds.insert_new(FileHandle { file, writable, readable }));
++            .map(|file| this.machine.fds.insert_new(FileHandle { file, writable, readable, sandboxed }));
+ 
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(fd)?))
+     }
+@@ -552,13 +553,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+     fn unlink(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+         let this = self.eval_context_mut();
+ 
+-        let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`unlink`", reject_with)?;
++        let Some(path) = this.sandboxed_path(path_op, "`unlink`")? else {
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+-        }
++        };
+ 
+         let result = fs::remove_file(path).map(|_| 0);
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+@@ -581,14 +578,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         }
+ 
+         let this = self.eval_context_mut();
+-        let target = this.read_path_from_c_str(this.read_pointer(target_op)?)?;
+-        let linkpath = this.read_path_from_c_str(this.read_pointer(linkpath_op)?)?;
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`symlink`", reject_with)?;
++        let Some(target) = this.sandboxed_path(target_op, "`symlink`")? else {
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+-        }
++        };
++        let Some(linkpath) = this.sandboxed_path(linkpath_op, "`symlink`")? else {
++            return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
++        };
+ 
+         let result = create_link(&target, &linkpath).map(|_| 0);
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+@@ -614,9 +609,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         // Relevant libc constants
+         let at_fdcwd = this.eval_libc_i32("AT_FDCWD");
+ 
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`linkat`", reject_with)?;
++        // Reject if isolation is enabled and no sandbox grants filesystem access.
++        if !this.check_fs_access("`linkat`")? {
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+         }
+ 
+@@ -632,7 +626,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         if oldpath_ptr == Pointer::null() {
+             return this.set_errno_and_return_neg1_i32(LibcError("EFAULT"));
+         }
+-        let oldpath = this.read_path_from_c_str(oldpath_ptr)?.into_owned();
++        let Some(oldpath) = this.sandboxed_path(oldpath_ptr, "`linkat`")? else {
++            return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
++        };
+ 
+         // Resolve newpath
+         if newfd != at_fdcwd {
+@@ -641,7 +637,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         if newpath_ptr == Pointer::null() {
+             return this.set_errno_and_return_neg1_i32(LibcError("EFAULT"));
+         }
+-        let newpath = this.read_path_from_c_str(newpath_ptr)?.into_owned();
++        let Some(newpath) = this.sandboxed_path(newpath_ptr, "`linkat`")? else {
++            return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
++        };
+ 
+         let result = fs::hard_link(&oldpath, &newpath).map(|()| 0);
+         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
+@@ -657,14 +655,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             panic!("`stat` should not be called on {}", this.tcx.sess.target.os);
+         }
+ 
+-        let path_scalar = this.read_pointer(path_op)?;
+-        let path = this.read_path_from_c_str(path_scalar)?.into_owned();
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`stat`", reject_with)?;
++        let Some(path) = this.sandboxed_path(path_op, "`stat`")? else {
+             return this.set_errno_and_return_neg1_i32(LibcError("EACCES"));
+-        }
++        };
+ 
+         // `stat` always follows symlinks.
+         let metadata = match FileMetadata::from_path(this, &path, true)? {
+@@ -686,14 +679,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             panic!("`lstat` should not be called on {}", this.tcx.sess.target.os);
+         }
+ 
+-        let path_scalar = this.read_pointer(path_op)?;
+-        let path = this.read_path_from_c_str(path_scalar)?.into_owned();
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`lstat`", reject_with)?;
++        let Some(path) = this.sandboxed_path(path_op, "`lstat`")? else {
+             return this.set_errno_and_return_neg1_i32(LibcError("EACCES"));
+-        }
++        };
+ 
+         let metadata = match FileMetadata::from_path(this, &path, false)? {
+             Ok(metadata) => metadata,
+@@ -715,9 +703,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+ 
+         let fd = this.read_scalar(fd_op)?.to_i32()?;
+ 
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`fstat`", reject_with)?;
++        // Reject if isolation is enabled and no sandbox grants filesystem access.
++        if !this.check_fs_access("`fstat`")? {
+             // Set error code as "EBADF" (bad fd)
+             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+         }
+@@ -754,7 +741,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+ 
+         let statxbuf = this.deref_pointer_as(statxbuf_op, this.libc_ty_layout("statx"))?;
+ 
+-        let path = this.read_path_from_c_str(pathname_ptr)?.into_owned();
++        // Keep the guest spelling around: the sandbox translates guest paths, not host ones.
++        let guest_path = this.read_os_str_from_c_str(pathname_ptr)?.to_owned();
++        let path = this
++            .convert_path(
++                Cow::Borrowed(&guest_path),
++                crate::shims::os_str::PathConversion::TargetToHost,
++            )
++            .into_owned();
+         // See <https://github.com/rust-lang/rust/pull/79196> for a discussion of argument sizes.
+         let at_empty_path = this.eval_libc_i32("AT_EMPTY_PATH");
+         let empty_path_flag = flags & at_empty_path == at_empty_path;
+@@ -776,9 +770,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             )
+         }
+ 
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`statx`", reject_with)?;
++        // Reject if isolation is enabled and no sandbox grants filesystem access.
++        if !this.check_fs_access("`statx`")? {
+             let ecode = if path.is_absolute() || dirfd == this.eval_libc_i32("AT_FDCWD") {
+                 // since `path` is provided, either absolute or
+                 // relative to CWD, `EACCES` is the most relevant.
+@@ -793,6 +786,18 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             return this.set_errno_and_return_neg1_i32(ecode);
+         }
+ 
++        // A non-empty path still has to pass the sandbox. The empty `AT_EMPTY_PATH` form names an
++        // already-open file descriptor, which can only have come through the sandbox itself.
++        let path = if path.as_os_str().is_empty() && empty_path_flag {
++            path
++        } else {
++            match this.machine.sandbox_fs.clone().map(|sandbox| sandbox.resolve(&guest_path)) {
++                Some(Some(host)) => host,
++                Some(None) => return this.set_errno_and_return_neg1_i32(LibcError("EACCES")),
++                None => path,
++            }
++        };
++
+         // If the `AT_SYMLINK_NOFOLLOW` flag is set, we query the file's metadata without following
+         // symbolic links.
+         let follow_symlink = flags & this.eval_libc_i32("AT_SYMLINK_NOFOLLOW") == 0;
+@@ -926,13 +931,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         if this.ptr_is_null(path_ptr)? {
+             return this.set_errno_and_return_neg1_i32(LibcError("EFAULT"));
+         }
+-        let path = this.read_path_from_c_str(path_ptr)?;
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`chmod`", reject_with)?;
++        let Some(path) = this.sandboxed_path(path_ptr, "`chmod`")? else {
+             return this.set_errno_and_return_neg1_i32(LibcError("EACCES"));
+-        }
++        };
+ 
+         let permissions = this.host_permissions_from_mode(mode.try_into().unwrap())?;
+         if let Err(err) = fs::set_permissions(path, permissions) {
+@@ -960,7 +961,10 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             // path-only file.
+             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+         }
+-        assert!(this.machine.communicate(), "isolation should have prevented even opening a file");
++        assert!(
++            this.machine.communicate() || file.sandboxed,
++            "isolation should have prevented even opening a file"
++        );
+ 
+         let permissions = this.host_permissions_from_mode(mode.try_into().unwrap())?;
+         if let Err(err) = file.file.set_permissions(permissions) {
+@@ -984,14 +988,12 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             return this.set_errno_and_return_neg1_i32(LibcError("EFAULT"));
+         }
+ 
+-        let oldpath = this.read_path_from_c_str(oldpath_ptr)?;
+-        let newpath = this.read_path_from_c_str(newpath_ptr)?;
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`rename`", reject_with)?;
++        let Some(oldpath) = this.sandboxed_path(oldpath_ptr, "`rename`")? else {
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+-        }
++        };
++        let Some(newpath) = this.sandboxed_path(newpath_ptr, "`rename`")? else {
++            return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
++        };
+ 
+         let result = fs::rename(oldpath, newpath).map(|_| 0);
+ 
+@@ -1008,13 +1010,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+             this.read_scalar(mode_op)?.to_u32()?
+         };
+ 
+-        let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`mkdir`", reject_with)?;
++        let Some(path) = this.sandboxed_path(path_op, "`mkdir`")? else {
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+-        }
++        };
+ 
+         #[cfg_attr(not(unix), allow(unused_mut))]
+         let mut builder = DirBuilder::new();
+@@ -1035,13 +1033,9 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+     fn rmdir(&mut self, path_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+         let this = self.eval_context_mut();
+ 
+-        let path = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`rmdir`", reject_with)?;
++        let Some(path) = this.sandboxed_path(path_op, "`rmdir`")? else {
+             return this.set_errno_and_return_neg1_i32(ErrorKind::PermissionDenied);
+-        }
++        };
+ 
+         let result = fs::remove_dir(path).map(|_| 0i32);
+ 
+@@ -1051,14 +1045,13 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+     fn opendir(&mut self, name_op: &OpTy<'tcx>) -> InterpResult<'tcx, Scalar> {
+         let this = self.eval_context_mut();
+ 
+-        let name = this.read_path_from_c_str(this.read_pointer(name_op)?)?;
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`opendir`", reject_with)?;
+-            this.set_last_error(LibcError("EACCES"))?;
+-            return interp_ok(Scalar::null_ptr(this));
+-        }
++        let name = match this.sandboxed_path(name_op, "`opendir`")? {
++            Some(name) => name,
++            None => {
++                this.set_last_error(LibcError("EACCES"))?;
++                return interp_ok(Scalar::null_ptr(this));
++            }
++        };
+ 
+         let result = fs::read_dir(name);
+ 
+@@ -1090,9 +1083,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+ 
+         let dirp = this.read_target_usize(dirp_op)?;
+ 
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`readdir`", reject_with)?;
++        // Reject if isolation is enabled and no sandbox grants filesystem access.
++        if !this.check_fs_access("`readdir`")? {
+             this.set_last_error(LibcError("EBADF"))?;
+             this.write_null(dest)?;
+             return interp_ok(());
+@@ -1221,9 +1213,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let dirp = this.read_target_usize(dirp_op)?;
+         let result_place = this.deref_pointer_as(result_op, this.machine.layouts.mut_raw_ptr)?;
+ 
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`readdir_r`", reject_with)?;
++        // Reject if isolation is enabled and no sandbox grants filesystem access.
++        if !this.check_fs_access("`readdir_r`")? {
+             // Return error code, do *not* set `errno`.
+             return interp_ok(this.eval_libc("EBADF"));
+         }
+@@ -1295,9 +1286,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+ 
+         let dirp = this.read_target_usize(dirp_op)?;
+ 
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`closedir`", reject_with)?;
++        // Reject if isolation is enabled and no sandbox grants filesystem access.
++        if !this.check_fs_access("`closedir`")? {
+             return this.set_errno_and_return_neg1_i32(LibcError("EBADF"));
+         }
+ 
+@@ -1349,9 +1339,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+     ) -> InterpResult<'tcx, Scalar> {
+         let this = self.eval_context_mut();
+ 
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`posix_fallocate`", reject_with)?;
++        // Reject if isolation is enabled and no sandbox grants filesystem access.
++        if !this.check_fs_access("`posix_fallocate`")? {
+             // Return error code "EBADF" (bad fd).
+             return interp_ok(this.eval_libc("EBADF"));
+         }
+@@ -1492,9 +1481,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let buf = this.read_pointer(buf_op)?;
+         let bufsize = this.read_target_usize(bufsize_op)?;
+ 
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`readlink`", reject_with)?;
++        // Reject if isolation is enabled and no sandbox grants filesystem access.
++        if !this.check_fs_access("`readlink`")? {
+             this.set_last_error(LibcError("EACCES"))?;
+             return interp_ok(-1);
+         }
+@@ -1551,15 +1539,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
+         let this = self.eval_context_mut();
+         this.assert_target_os_is_unix("realpath");
+ 
+-        let pathname = this.read_path_from_c_str(this.read_pointer(path_op)?)?;
+-        let processed_ptr = this.read_pointer(processed_path_op)?;
+-
+-        // Reject if isolation is enabled.
+-        if let IsolatedOp::Reject(reject_with) = this.machine.isolated_op {
+-            this.reject_in_isolation("`realpath`", reject_with)?;
++        let Some(pathname) = this.sandboxed_path(path_op, "`realpath`")? else {
+             this.set_last_error(LibcError("EACCES"))?;
+             return interp_ok(Scalar::from_target_usize(0, this));
+-        }
++        };
++        let processed_ptr = this.read_pointer(processed_path_op)?;
+ 
+         let result = std::fs::canonicalize(pathname);
+         match result {

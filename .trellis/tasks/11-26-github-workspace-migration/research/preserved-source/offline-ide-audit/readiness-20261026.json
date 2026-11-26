@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-25T17:22:39.585194+00:00",
+  "status": "source_frozen_execution_controls_unrun",
+  "executionAuthorized": false,
+  "currentGrant": null,
+  "old556ReplayAllowed": false,
+  "activeMarkerExists": false,
+  "priorFrozenSourceDrift": [],
+  "sourceSha256": {
+    "lib/rust_debugger.dart": "ba8b77c318778257ad2672438441da9bc1b78275895673e7f7e05254648978ac",
+    "lib/rust_native_feature_audit.dart": "fb8d997eae6af36dbbb39feedf35ac1b39c452f7079c83a6adedd3bb9a4eec4a",
+    "lib/main_catalog_audit.dart": "e637547c483949d23506dadc9979f583add9304fbfc2cb731cd2c44ab517640d",
+    "test/rust_debugger_test.dart": "bf8e1d2b7df1f84ceb8b3337b623c2a125cfba31da469e3cc8aa3d6769ce6f2f",
+    "test/rust_native_feature_audit_test.dart": "ad95f42056ed0ad92cad77d0b3a80297c6111f185e838ed201a485ab05e7f869",
+    "test/rust_workspace_integration_test.dart": "e7e1eb2484418b09bdd85bc58f9a3279e033be985a5c2c951c0180361d1c3731",
+    "native/miri_adapter/debug_abi_test.c": "83d2a8fff841793ffd69579a0fed5937fada8c95dcfc418cf2cf22030a12423c",
+    "native/miri_adapter/fs_abi_test.c": "f7c096795c38acddd668f0cd89c1da4e2e1944d245047c7bb7bbc442595bac0a",
+    "native/patches/miri-1.98.1-embedded-session.patch": "7e22cbafc2a0e1b0b93c1ff381b58c78e077e2724a9cc81cdcfd89337742d5a9",
+    "build/offline-ide-audit/run-reserved-validation.ps1": "ac466736f5d0cbd5160567300543b8137adc7eb1ef49b7c52cd48cfd46bb483b",
+    "build/offline-ide-audit/run-rust-owned-window.py": "6aae56e341ba0961aa9895a00cc2743ffcc7f9eae23526b54f1e531745cd276a",
+    "build/offline-ide-audit/rust_owned_job.py": "c0520616e6777d9587a6c0004487bd06a1b19b7d202563f8292c4c1a32c6b172",
+    "build/offline-ide-audit/publish-rust-release.ps1": "9bc54c9e200cf4a207251cf1be41fc9a9dfd1d20ca1122860ac04e07586047e1",
+    "build/offline-ide-audit/run-native-validation-current.sh": "9e4ea59dcaf6b221388f2caaa5f9ce5eb0a16284a5c8533fc7aeb5736ffed338",
+    "build/offline-ide-audit/native-group-supervisor.py": "1624ea21ddab857429f4289981ea4e2145f8cdc734316f01ed372fbd1ab72f9c"
+  },
+  "modes": {
+    "Native": {
+      "fileCount": 307,
+      "snapshotSha256": "104a46a11fd73f4793f17ff661d19bac0846b91306f74c4863b4b4e8c4667636",
+      "rust": {
+        "head": "ref: refs/heads/feat/rust-offline-ide-20261022",
+        "revision": "78fb7b149c140e589177bd5d7ac4f91231011a70"
+      },
+      "core": {
+        "head": "ref: refs/heads/main",
+        "revision": "2f9039a3ba95449679b17257b0313c1ee3644a2c"
+      },
+      "resolvedPackages": {
+        "qfli_rust": {
+          "root": "D:\\MyNewProjects\\qfli_rust",
+          "packageUri": "lib/"
+        },
+        "qfli_studio_core": {
+          "root": "D:\\MyNewProjects\\qfli_studio_core",
+          "packageUri": "lib/"
+        },
+        "re_editor": {
+          "root": "D:\\MyNewProjects\\qfli_studio_core\\vendor\\re_editor",
+          "packageUri": "lib/"
+        }
+      }
+    },
+    "Dart": {
+      "fileCount": 252,
+      "snapshotSha256": "0c1dad0cbd40c53b1e006e519a442c9a3fb7fb4b96f5e7425fd399e2d79f1ddb",
+      "rust": {
+        "head": "ref: refs/heads/feat/rust-offline-ide-20261022",
+        "revision": "78fb7b149c140e589177bd5d7ac4f91231011a70"
+      },
+      "core": {
+        "head": "ref: refs/heads/main",
+        "revision": "2f9039a3ba95449679b17257b0313c1ee3644a2c"
+      },
+      "resolvedPackages": {
+        "qfli_rust": {
+          "root": "D:\\MyNewProjects\\qfli_rust",
+          "packageUri": "lib/"
+        },
+        "qfli_studio_core": {
+          "root": "D:\\MyNewProjects\\qfli_studio_core",
+          "packageUri": "lib/"
+        },
+        "re_editor": {
+          "root": "D:\\MyNewProjects\\qfli_studio_core\\vendor\\re_editor",
+          "packageUri": "lib/"
+        }
+      }
+    }
+  }
+}
