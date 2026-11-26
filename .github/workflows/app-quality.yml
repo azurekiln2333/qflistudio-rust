@@ -1,0 +1,136 @@
+name: Application quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Never use pull_request_target or a privileged follow-up workflow for this job.
+# PR application/tests execute with no secrets and no persisted checkout token.
+# B's bootstrap evidence stays in build/app-artifacts/app-quality-linux-x64.
+# This helper publishes only build/app-quality/linux-x64, never an installer.
+# Required SDK: 3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7724e60.
+# Final core approval and Rust native-hooks compatibility remain owner gates.
+permissions:
+  contents: read
+
+concurrency:
+  group: app-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  quality-helper-contracts:
+    name: Quality helper contracts (no core required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qflistudio-rust
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Check quality helper syntax without bytecode outputs
+        working-directory: qflistudio-rust
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in ('app_quality.py', 'test_app_quality.py'):
+              path = Path('tool/ci') / name
+              ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+          PY
+      - name: Hermetic quality helper regressions
+        working-directory: qflistudio-rust
+        run: python -m unittest discover -s tool/ci -p 'test_app_quality.py' -v
+
+  application-quality:
+    name: Core-bound format, analysis and full root tests
+    # Intentionally no needs/helper result gate: missing core approval must fail
+    # this job with a blocked report, rather than turn it into a skipped pass.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    defaults:
+      run:
+        shell: bash
+        working-directory: qflistudio-rust
+    env:
+      QFLI_PLATFORM: linux
+      QFLI_ARCH: x64
+      CORE_SHA: ${{ vars.QFLI_APPROVED_CORE_SHA }}
+      APPROVED_CORE_SHA: ${{ vars.QFLI_APPROVED_CORE_SHA }}
+      CORE_SDK_CONTRACT: ${{ vars.QFLI_CORE_SDK_CONTRACT }}
+      PUB_CACHE: ${{ runner.temp }}/qfli-quality-pub-cache
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qflistudio-rust
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Initialize source-bound bootstrap report
+        id: init
+        run: >-
+          python tool/ci/app_build.py init
+          --platform linux --arch x64
+          --output-dir build/app-artifacts/app-quality-linux-x64
+      - name: Require the same owner-approved core and SDK contract as installers
+        id: preflight
+        run: >-
+          python tool/ci/app_build.py preflight
+          --platform linux --arch x64
+          --output-dir build/app-artifacts/app-quality-linux-x64
+      - name: Check out immutable approved sibling core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: azurekiln2333/qflistudio-core
+          ref: ${{ steps.preflight.outputs.core_sha }}
+          path: qflistudio-core
+          persist-credentials: false
+      - name: Verify core checkout, Dart identity, lockfile and vendor paths
+        run: >-
+          python tool/ci/app_build.py verify-core
+          --platform linux --arch x64
+          --output-dir build/app-artifacts/app-quality-linux-x64
+      - name: Prepare the exact approved Flutter-OH tag and revision
+        # B owns the SDK recipe. No copied override or speculative core patch.
+        run: >-
+          python tool/ci/app_build.py setup-flutter
+          --platform linux --arch x64
+          --output-dir build/app-artifacts/app-quality-linux-x64
+      - name: Restore dependencies and bind quality input provenance
+        run: python tool/ci/app_quality.py prepare
+      - name: Verify Dart formatting without rewriting source
+        if: ${{ !cancelled() }}
+        run: python tool/ci/app_quality.py format
+      - name: Analyze the application with no dependency restore
+        if: ${{ !cancelled() }}
+        run: python tool/ci/app_quality.py analyze
+      - name: Run flutter test --no-pub --machine over the entire root test directory
+        if: ${{ !cancelled() }}
+        run: python tool/ci/app_quality.py test
+      - name: Finalize quality outcomes, bounded reports and checksums
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: python tool/ci/app_quality.py finalize --job-status "$JOB_STATUS"
+      # Upload is a separate job outcome; runner finalization cannot attest to
+      # a future service upload. No privileged workflow consumes this artifact.
+      - name: Upload quality reports, not application packages
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: application-quality-linux-x64
+          path: qflistudio-rust/build/app-quality/linux-x64/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

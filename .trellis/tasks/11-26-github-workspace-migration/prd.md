@@ -17,8 +17,10 @@ Hand over verified state to its Codex coordinator through Herdr.
 - All five advertised remote branch tips are ancestors of local main.
 - Untracked work includes `11-17-app-installers` and `tool/ci/ci_support.py`.
 - Root ignore rules exclude specs, workflow, scripts, journals and agent helpers.
-- Only `.github/workflows/native-runtime.yml` exists. Successful run
-  `44012848384` proves its native targets, not application installers.
+- At the initial audit only `.github/workflows/native-runtime.yml` existed.
+  Application installer and quality workflows now have source implementation;
+  their actual hosted validation remains pending. Native success never proves
+  application installers.
 - Core owner confirmed the editing folder `../qflistudio-core`.
   Dart package name remains `qfli_studio_core`. Checkout paths and overrides
   must agree. The external `patch_upstream_core.sh` is owned by qflistudio-next;
@@ -94,7 +96,8 @@ publication and acquiring paid signing accounts remain outside this task.
 
 ## Execution prerequisites
 
-- Review the final planning summary before implementation.
+- Execution was approved on 2026-11-27 through Claude w61:p6. The task is
+  `in_progress`; no further planning-review approval is pending.
 - Obtain the final core handoff before selecting the production CI pin.
 - Audit signing metadata; do not treat absent secrets as a completed installer.
 - Resolve shared WSL ownership before destructive distribution removal.
@@ -105,5 +108,27 @@ The confirmed paths, repository ownership, GitHub-only destination, cloud-only
 execution and Herdr collaboration resolve the requested scope. Technical
 prerequisites above remain explicit execution gates, not assumed successes.
 This PRD has been consolidated against the design, implementation plan and
-dated research record. The final planning summary awaits user review.
+dated research record. The user approved the final plan and execution on
+2026-11-27. Continue the existing `in_progress` task, not a new planning gate.
+
+## Current evidence boundary — 2026-11-27
+
+Rescue classification is complete: 119 source/evidence copies preserve
+2,329,864 bytes. All 14 unreachable blobs are reconciled as 11 copies and three
+exact index duplicates. Raw-byte corrective publication and receiving-clone
+comparison remain separate evidence gates. Preserve original source and objects.
+
+Cloud checks `45894657274` at
+`a07511394cfc8a8079e226e37468c571b9d0ed1e` passed all four jobs. Each OS ran
+291 native tests with platform-specific skips. Application helpers were
+explicitly NOT RUN because those files were not in that commit. Native run
+`45890222976` at `c859677d482ef358c5aed2efdad7e2daf9a6b288` passed shared guest
+and all five mobile targets. Newer native run `45894657258` at `a075113` was
+running at the recorded inspection; do not promote that state to success.
+
+The final core SHA, approved SDK contract and Rust native-hooks recipe are not
+available. Actual application quality, packaging, signing/device checks and
+Android armv7 remain pending. Keep this parent and its children `in_progress`.
+Source hook paths have been reviewed, but receiver hook execution remains
+unresolved. The F2 service-tier warning is separate from the hook failure.
 

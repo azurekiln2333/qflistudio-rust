@@ -1,0 +1,232 @@
+name: App installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_run_id:
+        description: Optional successful, source-compatible Native runtime run ID
+        type: string
+        default: ''
+      core_sha:
+        description: Optional SHA; must match owner-approved QFLI_APPROVED_CORE_SHA
+        type: string
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/app-installers.yml'
+      - 'tool/ci/**'
+      - 'lib/**'
+      - 'assets/**'
+      - 'android/**'
+      - 'ios/**'
+      - 'linux/**'
+      - 'macos/**'
+      - 'ohos/**'
+      - 'windows/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: app-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  helper-checks:
+    name: Orchestration checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: qflistudio-rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qflistudio-rust
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      # Independent of CORE_SHA: contract tests remain available during handoff.
+      - name: Check helper syntax and regression contracts
+        run: |
+          python -m compileall -q tool/ci
+          python -m unittest discover -s tool/ci -p 'test_*.py' -v
+      - name: Parse workflow and verify pinned action runtimes
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+          python - <<'PY'
+          import re, sys, urllib.request
+          from pathlib import Path
+          import yaml
+          sys.path.insert(0, 'tool/ci')
+          from ci_support import ACTION_PINS
+          workflow = Path('.github/workflows/app-installers.yml').read_text()
+          parsed = yaml.safe_load(workflow)
+          assert isinstance(parsed['jobs'], dict)
+          references = set(re.findall(r'(?m)^\s*-?\s*uses:\s*(\S+)', workflow))
+          for reference in references:
+              owner, commit = reference.rsplit('@', 1)
+              assert re.fullmatch(r'[0-9a-f]{40}', commit), reference
+              assert ACTION_PINS.get(owner) == commit, reference
+              url = f'https://raw.githubusercontent.com/{owner}/{commit}/action.yml'
+              with urllib.request.urlopen(url, timeout=60) as response:
+                  action = yaml.safe_load(response.read())
+              assert action['runs']['using'] == 'node24', reference
+          print('Application workflow parsed; all action pins use Node 24.')
+          PY
+
+  application:
+    name: ${{ matrix.platform }}/${{ matrix.arch }}
+    needs: helper-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            arch: arm64-x64
+            os: ubuntu-24.04
+          - platform: ios
+            arch: arm64
+            os: macos-15-intel
+          - platform: ohos
+            arch: arm64
+            os: ubuntu-24.04
+          - platform: linux
+            arch: x64
+            os: ubuntu-24.04
+          - platform: windows
+            arch: x64
+            os: windows-2022
+          - platform: macos
+            arch: arm64
+            os: macos-26
+          - platform: macos
+            arch: x64
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+        working-directory: qflistudio-rust
+    env:
+      QFLI_PLATFORM: ${{ matrix.platform }}
+      QFLI_ARCH: ${{ matrix.arch }}
+      CORE_SHA: ${{ inputs.core_sha || vars.QFLI_APPROVED_CORE_SHA }}
+      APPROVED_CORE_SHA: ${{ vars.QFLI_APPROVED_CORE_SHA }}
+      CORE_SDK_CONTRACT: ${{ vars.QFLI_CORE_SDK_CONTRACT }}
+      RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
+      PUB_CACHE: ${{ runner.temp }}/qfli-pub-cache
+      GRADLE_USER_HOME: ${{ runner.temp }}/qfli-gradle
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qflistudio-rust
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Initialize source-bound report
+        id: init
+        run: python tool/ci/app_build.py init
+      - name: Require owner-approved core and SDK contract
+        id: preflight
+        run: python tool/ci/app_build.py preflight
+      # Checkout directory is the editing alias, not the Dart package name.
+      # pubspec, vendor override and lock path must use ../qflistudio-core.
+      - name: Check out approved core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: azurekiln2333/qflistudio-core
+          ref: ${{ steps.preflight.outputs.core_sha }}
+          path: qflistudio-core
+          persist-credentials: false
+      - name: Verify core checkout and package paths
+        run: python tool/ci/app_build.py verify-core
+      - name: Install Linux build prerequisites
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev libblkid-dev liblzma-dev
+      - name: Set up Java 17
+        if: matrix.platform == 'android' || matrix.platform == 'ohos'
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install pinned Android NDK
+        if: matrix.platform == 'android'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.0.12077973"'
+      - name: Prepare OHOS SDK tooling
+        if: matrix.platform == 'ohos'
+        run: |
+          python -m pip install --disable-pip-version-check 'json5==0.12.1'
+          python tool/ci/app_build.py setup-ohos
+      - name: Resolve compatible native runtime
+        id: runtime
+        if: matrix.platform == 'android' || matrix.platform == 'ios' || matrix.platform == 'ohos'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tool/ci/app_build.py resolve-runtime
+      - name: Download selected native runtime archives
+        if: steps.runtime.outcome == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          run-id: ${{ steps.runtime.outputs.run_id }}
+          github-token: ${{ github.token }}
+          artifact-ids: ${{ steps.runtime.outputs.artifact_ids }}
+          path: ${{ runner.temp }}/native-runtime
+          merge-multiple: true
+      - name: Verify and install native payload
+        if: steps.runtime.outcome == 'success'
+        env:
+          NATIVE_RUN_ID: ${{ steps.runtime.outputs.run_id }}
+        run: >-
+          python tool/ci/app_build.py install-runtime
+          --source "$RUNNER_TEMP/native-runtime" --run-id "$NATIVE_RUN_ID"
+      - name: Prepare pinned Flutter SDK
+        run: python tool/ci/app_build.py setup-flutter
+      - name: Build release application
+        run: python tool/ci/app_build.py build
+      - name: Package and verify installer
+        run: python tool/ci/package_installer.py --platform "$QFLI_PLATFORM" --arch "$QFLI_ARCH"
+      - name: Finalize status, provenance and checksums
+        if: always() && steps.init.outcome == 'success'
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: python tool/ci/app_build.py finalize --job-status "$JOB_STATUS"
+      - name: Upload reports and verified packages
+        if: always() && steps.init.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-installer-${{ matrix.platform }}-${{ matrix.arch }}
+          path: qflistudio-rust/build/app-artifacts/app-installer-${{ matrix.platform }}-${{ matrix.arch }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      # Exact Flutter packaging-input bytes only (4 GiB / 30,000 members max),
+      # with per-file hashes and provenance. No SDK/compiler/tool caches.
+      - name: Upload bounded Flutter packaging inputs and provenance
+        if: always() && steps.init.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-intermediates-${{ matrix.platform }}-${{ matrix.arch }}
+          path: qflistudio-rust/build/app-intermediates/${{ matrix.platform }}-${{ matrix.arch }}/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 1

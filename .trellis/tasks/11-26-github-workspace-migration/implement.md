@@ -45,9 +45,14 @@
 
 ## Worker ownership during execution
 
-Assign work only after approval and refreshed context:
-- Worker A / w61:p2: AGENTS.md, root and Trellis ignore rules, portable
-  workflow/config/spec/skill guidance, research/source-portability.md.
+Execution approval is recorded above. Refresh exact ownership before writes:
+- Worker A / w61:p2 current docs-only scope:
+  `.trellis/spec/backend/github-app-builds.md` (new),
+  `.trellis/spec/backend/github-native-builds.md`,
+  `.trellis/spec/backend/index.md`,
+  `.trellis/spec/guides/cloud-only-workspace.md`, and this parent's
+  `prd.md`/`implement.md`. Earlier portability work is historical scope, not
+  current permission to modify AGENTS, ignore rules or research.
 - Worker B / w61:p3: tool/ci/ci_support.py, app_build.py,
   .github/workflows/app-installers.yml and orchestration helper tests.
 - Worker C / w61:p4: tool/ci/package_installer.py, windows_installer.iss,
@@ -55,8 +60,9 @@ Assign work only after approval and refreshed context:
 - Worker D / w61:p5: scripts/ci_native_runtime.py,
   scripts/test_ci_native_runtime.py, native-runtime.yml when required,
   native task research, plus read-only review of A's changes.
-The coordinator owns task documents, spec integration, final cross-review,
-Git writes, target update and handover. Refine exact file ownership before each
+The coordinator retains final task/spec integration, cross-review, Git writes,
+target update and handover. A's explicitly delegated parent-doc edits are
+limited to the two files listed above. Refine exact file ownership before each
 dispatch; workers must preserve other edits and never commit.
 
 ## Execution record — 2026-11-27
@@ -65,8 +71,21 @@ The user confirmed execution after the final planning review. Task start
 succeeded and all four existing Pi workers received scoped implementation
 through Herdr. Claude w61:p6 monitors without file or Git writes.
 
-The first native fix verifies both Android library copies in the archived
-payload. Its regression is assigned to D; cloud execution remains pending.
+The native fix verifies both the copied runtime package and Android JNI library
+copy against the manifest. Cloud checks `45894657274` at
+`a07511394cfc8a8079e226e37468c571b9d0ed1e` passed all four jobs. Each OS ran
+291 native tests, with Windows skipping one and Linux/macOS skipping three.
+The JNI-only corruption regression passed. Source/workflow/portability policy
+and controlled-Chinese checks passed. Application helper coverage was explicitly
+NOT RUN because the application files were not part of that commit.
+
+Native runtime `45890222976` at
+`c859677d482ef358c5aed2efdad7e2daf9a6b288` passed shared guest and all five
+mobile target jobs: Android arm64/x64, OHOS arm64/x64 and iOS arm64. At the
+recorded inspection newer run `45894657258` at `a075113` had a successful guest
+and five running targets. Preserve that dated state until the coordinator
+records newer hosted evidence. App runtime selection still requires exact
+native/scripts/workflow Git-object compatibility, not merely an older green run.
 Android armv7 remains an explicit unmet requirement across compiler, ELF32,
 host/ABI selection, Gradle and Dart loader layers. Do not count two APKs as three.
 
@@ -75,8 +94,29 @@ Packaging leaves overall manifest status incomplete until finalization verifies
 the complete package set. OHOS uses its source bundle ID com.azurekiln.qfli.rust.
 The generic Android/Apple identity must not overwrite it.
 
-Core's final migration SHA and validated SDK contract remain external gates.
+Core's final migration SHA, validated SDK contract and Rust native-hooks recipe
+remain external gates. No provisional core SHA is an approved production pin.
 Independent cloud helper/native checks should run without that app dependency.
+
+Rescue classification is complete: 119 preserved copies, 2,329,864 bytes and all
+14 unreachable blobs reconciled (11 copies, three exact index duplicates).
+Raw-byte corrective publication and target comparison remain separate gates.
+Do not disturb the coordinator's correction or delete the original object store.
+Source hook paths have been reviewed. Receiver hook execution remains unresolved:
+its exit-code-1 transcript lacks command/stderr. The F2 service-tier/model warning
+is separate and is not a hook diagnosis.
+
+Worker A applied `trellis-update-spec` to the assigned documentation. The new
+seven-section application contract records command/environment/schema behavior,
+final core/SDK gates, producer-byte provenance, typed Hvigor Boolean no-sign,
+exact packaging-input bytes, installer/quality reports, failure matrices and
+required regressions. Native contracts now cover both library copies, selected
+absolute aliases and raw topic-byte fixtures. This is source-only review, not
+an application validation pass. Finalizer publication/checksum-failure cleanup
+and quality-specific failure handling still require owner handoff/review and
+hosted regression evidence. No local executable check or Git write was run by A.
+Actual application quality/packaging, signing, devices and Android armv7 remain
+pending. Parent/native/installer task status remains `in_progress`.
 
 ## Allowed local verification
 

@@ -36,9 +36,14 @@ scripts, specs, agent definitions, task artifacts, research and progress journal
 Preserve reviewed screenshots, patches and authored source snapshots as evidence;
 a directory named `research` or `build` alone does not determine ownership.
 Never run blanket cleanup or discard the original Git object store on that basis.
-Classification of the original 14 unreachable blobs and authored code/patches
-inside generated roots remains pending. Preserve those bytes and their original
-paths until unique source/evidence is reviewed and deliberately preserved.
+The rescue ledger now preserves 119 authored/evidence copies, totaling
+2,329,864 bytes. All 14 original unreachable blobs are reconciled: 11 preserved
+copies and three exact index duplicates. Rescue classification is complete.
+The directory-local `* -text` rule protects historical raw bytes; publication
+and receiving-clone comparison are separate gates. Keep original source and
+Git objects until the coordinator records those gates and authorizes cleanup.
+See the migration task's `research/preservation-rescue.md` and dated execution
+record. Do not alter the coordinator's raw-byte correction as part of a spec edit.
 
 The root ignore rules expose only Markdown files in explicitly reviewed
 `.agents/skills/trellis-*` directories. New skills and non-Markdown skill assets
@@ -52,10 +57,14 @@ Trellis version marker. Keep `.trellis/.template-hashes.json` local as updater
 management state; do not rewrite it just to mark project customizations clean.
 Reinstall machine-specific platform integrations deliberately after migration;
 portable specs/scripts alone do not prove an editor hook works on a new machine.
-`.codex` and `.trae` hook/config portability is explicitly pending separate
-source/dependency review. Do not blanket-copy them or discard authored hooks
-as editor state. The receiving coordinator's reported startup-hook failure
-remains unresolved until that integration review has evidence.
+The source hook paths have been reviewed; that review does not establish hook
+execution in the receiving clone. Do not blanket-copy machine integrations or
+discard authored hooks as editor state. The receiver's startup transcript reports
+`Hook failed` / exit code 1 without the command or stderr. Its execution failure
+remains unresolved. The F2 service-tier/model support warning is a separate
+warning, not hook diagnostics, and does not identify the hook's cause. Require
+receiver-side command/stderr and successful execution evidence before claiming
+a repair. Source review alone is not an integration pass.
 
 Ignore rules are not a secret audit and do not untrack existing files. Review
 outgoing file content and staged paths before publication. Secret-presence
@@ -89,5 +98,11 @@ preservation, ownership and replacement evidence. Coordinate shared WSL owners.
 A successful native-runtime job does not prove a Flutter application installer,
 application tests or target-device execution. Keep these outcomes separate.
 An unsigned IPA/HAP is not a device-installable signed-package pass. Do not mark
-required coverage or a task complete while checks, preservation or credentials
-remain unresolved. Link real cloud evidence and name each blocker explicitly.
+required coverage or a task complete while checks, transfer comparison or
+credentials remain unresolved. Link real cloud evidence and name each blocker
+explicitly. See [Application CI contracts](../backend/github-app-builds.md) for
+core/SDK approval, producer-byte verification, typed OHOS no-sign, bounded
+intermediates and quality-only report semantics. Native/helper success does not
+approve an absent final core SHA, SDK contract or Rust native-hooks recipe.
+Actual application packaging, signing, device validation and Android armv7
+remain pending.
