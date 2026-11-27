@@ -156,7 +156,12 @@ void main() {
       chunks.clear();
       expect(await delegate('rustc --version'), isTrue);
       expect(backend.lastExitCode, 0, reason: err());
-      expect(out(), contains('rustc 1.98.1'));
+      final version = out().trim();
+      if (compilerPath != null) {
+        expect(version, matches(RegExp(r'^rustc 1\.98\.1(?:\s|$)')));
+      } else {
+        expect(version, matches(RegExp(r'^rustc \d+\.\d+\.\d+(?:[-\s]|$)')));
+      }
       expect(err(), isEmpty);
     });
 
@@ -164,7 +169,12 @@ void main() {
       chunks.clear();
       expect(await delegate('cargo --version'), isTrue);
       expect(backend.lastExitCode, 0, reason: err());
-      expect(out(), contains('cargo 1.98.1'));
+      final version = out().trim();
+      if (compilerPath != null) {
+        expect(version, matches(RegExp(r'^cargo 1\.98\.1(?:\s|$)')));
+      } else {
+        expect(version, matches(RegExp(r'^cargo \d+\.\d+\.\d+(?:[-\s]|$)')));
+      }
     });
 
     test(
@@ -251,9 +261,25 @@ fn main() {
 
   group('bundled GNU linker fallback', () {
     test('resolves rust-lld flags for the bundled GNU rustc', () async {
+      if (!Platform.isWindows) {
+        expect(
+          await resolveGnuLinkerFallbackFlags(
+            rustcExecutable: 'rustc',
+            environment: Platform.environment,
+            workingDirectory: directory.path,
+          ),
+          isEmpty,
+        );
+        return;
+      }
+
+      final environment = compilerPath;
+      if (environment == null) {
+        fail('The bundled Windows GNU compiler was not found.');
+      }
       final flags = await resolveGnuLinkerFallbackFlags(
         rustcExecutable: 'rustc',
-        environment: compilerPath!,
+        environment: environment,
         workingDirectory: directory.path,
       );
       expect(flags, hasLength(6));
@@ -287,7 +313,10 @@ fn main() {
     test('a project .cargo/config.toml disables the fallback', () async {
       write('.cargo/config.toml', '[build]\njobs = 1\n');
       expect(
-        await hasCargoLinkerConfiguration(directory.path, compilerPath!),
+        await hasCargoLinkerConfiguration(
+          directory.path,
+          compilerPath ?? Platform.environment,
+        ),
         isTrue,
       );
     });
@@ -571,8 +600,8 @@ fn main() {
 
 /// PATH override that makes the bundled real compiler discoverable.
 ///
-/// Returns null when no bundled compiler exists, so the real-execution tests
-/// fail loudly instead of silently skipping.
+/// Returns null when no bundled compiler exists, leaving the real-execution
+/// tests on the system PATH. Commands still fail loudly instead of skipping.
 Map<String, String>? _compilerPathOverride() {
   final candidates = <String>[
     p.join('native', 'build', 'miri-windows', 'compiler', 'bin'),

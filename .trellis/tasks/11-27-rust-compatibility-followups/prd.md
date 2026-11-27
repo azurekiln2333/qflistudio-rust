@@ -9,10 +9,15 @@ This independent task is planning only. The user-approved coordinator ruling
 Do not start implementation, close the installer/native product tasks, or infer
 execution approval from migration `done.json`.
 
-The 2026-11-28 01:36 ruling in
-`D:/MyNewProjects/_orchestra/decisions/core-ref-wave.md` supersedes the
-core-last hold. Pin immutable `CORE_REF` to
-`1ae4674a4b153701b0c3b3ff04b1a1b77a318611` for this authorized wave.
+The 2026-11-28 03:30 ruling in
+`D:/MyNewProjects/_orchestra/decisions/core-ref-wave-2.md` replaces the first
+wave's pin. Pin immutable `CORE_REF` to
+`8e031313ffc8d531c5a6b4d131f721f35da04c86` for this authorized wave.
+The brain later required pin-only publication, completed at
+`68723d029dfd9dae8ea91c97b8a26848f116e8cd`. Gate, clean target parity and the
+exact-SHA acknowledgement passed before deferred quality repairs were restored.
+Restoration made the source dirty at that recorded point; later repairs require separate publication, a new gate,
+renewed parity and acknowledgement.
 Do not adopt another core SHA unless the brain sends another wave.
 The reviewed SDK recipe remains
 Flutter-OH `3.41.10-ohos-1.0.1` at
@@ -47,11 +52,16 @@ does not claim they are complete or passing.
 - F6: Obtain receiver-hook command, stderr and execution evidence before
   diagnosing or claiming repair. The separate service-tier warning is not
   evidence of the hook's cause.
-- F7: The brain authorized the core wave at
-  `1ae4674a4b153701b0c3b3ff04b1a1b77a318611`. Complete one pin-only consumer
-  commit, orchestra gate, target parity and acknowledgement, then hosted CI.
-  Record actual outcomes before closing the wave. Keep root core/vendor
-  dependencies and lock/resolution provenance coherent with the new pin.
+- F7: The brain authorized the second core wave at
+  `8e031313ffc8d531c5a6b4d131f721f35da04c86`. Its pin-only consumer commit
+  `68723d029dfd9dae8ea91c97b8a26848f116e8cd` passed the orchestra gate, target
+  parity and acknowledgement before repair restoration. Cloud checks
+  `46072255988` passed. Quality `46072256145` passed helpers, preparation and
+  analysis but failed formatting and root tests. Installers `46072256031`
+  passed six of seven platform jobs; iOS failed on `hashlib.file_digest`.
+  Application quality and product acceptance remain open. Keep root core/vendor
+  dependencies and lock/resolution provenance coherent with the pin. Any repair
+  publication requires a new gate, target parity, acknowledgement and hosted CI.
 
 ## Evidence and acceptance
 

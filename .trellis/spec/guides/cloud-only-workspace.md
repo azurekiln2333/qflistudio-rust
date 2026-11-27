@@ -123,9 +123,16 @@ The coordinator's 2026-11-27 14:35 ruling limits `done.json` to workspace
 migration. Pin the brain-authorized core SHA as immutable `CORE_REF`, retain the exact
 reviewed SDK recipe, and retain actual hosted Dart formatting, Flutter
 analysis and complete root-suite evidence at the published migration SHA.
-The 2026-11-28 01:36 `core-ref-wave.md` ruling supersedes the core-last hold
-with core `1ae4674a4b153701b0c3b3ff04b1a1b77a318611`. This wave requires a
-pin-only commit, gate, target parity and acknowledgement, and hosted CI evidence.
+The 2026-11-28 03:30 `core-ref-wave-2.md` ruling replaces the first wave's pin
+with core `8e031313ffc8d531c5a6b4d131f721f35da04c86`. The brain later required
+pin-only publication, completed at `68723d029dfd9dae8ea91c97b8a26848f116e8cd`.
+Gate, clean target parity and exact-SHA acknowledgement passed before deferred
+quality repairs were restored. Restoration made the source dirty at that recorded point. The separate repair commit
+requires a new gate, parity measurement and acknowledgement. Cloud checks
+`46072255988` passed. Quality `46072256145` passed helpers, preparation and
+analysis but failed formatting and root tests. Installers `46072256031` passed
+six of seven platform jobs; iOS failed on `hashlib.file_digest`. Application
+quality and product acceptance remain open.
 Do not adopt another core SHA unless the brain sends another wave.
 Missing final production core/SDK or Rust native-hooks approval does not block
 this migration pin. It remains unverified product compatibility.

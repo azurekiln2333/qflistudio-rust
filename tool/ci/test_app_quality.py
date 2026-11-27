@@ -589,6 +589,396 @@ class QualityCommandTests(QualityFixtures):
         command.assert_not_called()
 
 
+class QualityFormatDiagnosticTests(QualityFixtures):
+    """Best-effort formatter context that can never weaken the strict failure."""
+
+    APPROVED = "test/rust_code_analyzer_test.dart"
+
+    def setUp(self):
+        super().setUp()
+        self.write(self.APPROVED, "void main() {}\n")
+        self.tracked.append(self.APPROVED)
+        self.manifest = self.prepared()
+        self.command = quality.commands(self.args)["format"]
+
+    def preview(self, outputs=None):
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append((list(command), dict(kwargs)))
+            return "void main() {}\n" if outputs is None else outputs[len(calls) - 1]
+
+        return mock.patch.object(quality, "run_format_preview", side_effect=runner), calls
+
+    def test_preview_uses_pinned_output_show_flags_and_no_write_flags(self):
+        patcher, calls = self.preview()
+        with patcher:
+            diagnostic = quality.format_failure_diagnostic(self.args, self.command, RuntimeError("drift"))
+        command = calls[0][0]
+        self.assertEqual(command[1:5], ["format", "--output=show", "--show=none", "--summary=none"])
+        self.assertEqual(command[5:], [self.APPROVED])
+        self.assertEqual(command[0], str(self.command[0]))
+        # A source-writing flag would defeat the --output=none contract.
+        for forbidden in ("--set-exit-if-changed", "--output=write", "--show=all", "--summary=line"):
+            self.assertNotIn(forbidden, command)
+        self.assertEqual(calls[0][1]["cwd"], self.root.resolve())
+        self.assertIn("Original failure: drift", diagnostic)
+        self.assertIn("no textual delta", diagnostic)
+
+    def test_redaction_precedes_the_published_diff(self):
+        source = "// token=not-a-real-token\nvoid main() {}\n"
+        formatted = "// token=not-a-real-token\nvoid main() { }\n"
+        self.write(self.APPROVED, source)
+        patcher, _ = self.preview(outputs=[formatted])
+        with patcher:
+            diagnostic = quality.format_failure_diagnostic(self.args, self.command, RuntimeError("drift"))
+        self.assertIn("Safe formatter diff for " + self.APPROVED, diagnostic)
+        self.assertNotIn("not-a-real-token", diagnostic)
+        self.assertIn("void main() { }", diagnostic)
+
+    def test_diff_keeps_full_lines_and_empty_inputs(self):
+        before = {"text": "first\nlast line without newline"}
+        diff = quality.format_diff("test/one_test.dart", before, "first\nlast line without newline changed")
+        self.assertIn("last line without newline\n", diff)
+        self.assertIn("last line without newline changed\n", diff)
+        self.assertEqual(quality.format_diff("test/one_test.dart", {"text": ""}, ""), "")
+
+    def test_oversized_preview_output_is_refused_by_the_runner(self):
+        def fake_popen(command, **kwargs):
+            class Process:
+                returncode = 0
+
+                def poll(self):
+                    return 0
+
+                def wait(self, timeout=None):
+                    return 0
+
+                def kill(self):
+                    return None
+
+            process = Process()
+            kwargs["stdout"].write(b"x" * (quality.MAX_FORMAT_DIAGNOSTIC_OUTPUT_BYTES + 1))
+            kwargs["stdout"].flush()
+            return process
+
+        with mock.patch.object(quality.subprocess, "Popen", side_effect=fake_popen):
+            with self.assertRaisesRegex(RuntimeError, "exceeds or fails to finish its bound"):
+                quality.run_format_preview(self.command, cwd=self.root, env={})
+        self.assertEqual(list(self.scratch.glob("qfli-format-preview-*")), [])
+
+    def test_private_file_capture_does_not_wait_for_inherited_open_handles(self):
+        inherited = []
+        process = mock.Mock()
+        process.poll.return_value = 0
+        process.wait.side_effect = AssertionError("must not wait for inherited stdout")
+
+        def fake_popen(command, **kwargs):
+            self.assertEqual(kwargs["stdin"], quality.subprocess.DEVNULL)
+            self.assertEqual(kwargs["stderr"], quality.subprocess.DEVNULL)
+            # Keep a separate descriptor open after the direct child has exited.
+            child_output = os.fdopen(os.dup(kwargs["stdout"].fileno()), "wb", buffering=0)
+            inherited.append(child_output)
+            child_output.write(b"void main() {}\n")
+            return process
+
+        try:
+            with mock.patch.object(quality.subprocess, "Popen", side_effect=fake_popen):
+                result = quality.run_format_preview(self.command, cwd=self.root, env={})
+            self.assertEqual(result, "void main() {}\n")
+            self.assertEqual(len(inherited), 1)
+            self.assertFalse(inherited[0].closed)
+            process.wait.assert_not_called()
+            process.stdout.read.assert_not_called()
+            process.stdout.close.assert_not_called()
+        finally:
+            for handle in inherited:
+                handle.close()
+
+    def test_partial_preview_read_failure_is_rejected(self):
+        class Process:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                return None
+
+        def fake_popen(command, **kwargs):
+            kwargs["stdout"].write(b"partial")
+            kwargs["stdout"].flush()
+            return Process()
+
+        original_open = Path.open
+
+        for failure_type in (OSError, ValueError):
+            with self.subTest(failure_type=failure_type):
+                read_sizes = []
+
+                def broken_open(path, mode="r", *args, **kwargs):
+                    handle = original_open(path, mode, *args, **kwargs)
+                    if mode != "rb" or path.name != "stdout.log":
+                        return handle
+
+                    class BrokenRead:
+                        def __enter__(self):
+                            return self
+
+                        def __exit__(self, *arguments):
+                            return handle.__exit__(*arguments)
+
+                        def read(self, size=-1):
+                            read_sizes.append(size)
+                            if len(read_sizes) == 1:
+                                return handle.read(min(size, 2))
+                            raise failure_type("simulated read failure after partial output")
+
+                    return BrokenRead()
+
+                with mock.patch.object(quality.subprocess, "Popen", side_effect=fake_popen), \
+                        mock.patch.object(Path, "open", new=broken_open):
+                    with self.assertRaisesRegex(RuntimeError, "could not be read"):
+                        quality.run_format_preview(self.command, cwd=self.root, env={})
+                self.assertEqual(len(read_sizes), 2)
+                self.assertTrue(all(0 < size <= 8192 for size in read_sizes))
+
+    def test_timeout_kills_the_preview_and_is_reported_not_raised(self):
+        def sleep_and_report(command, **kwargs):
+            raise quality.subprocess.TimeoutExpired(command, 1)
+
+        with mock.patch.object(quality, "run_format_preview", side_effect=sleep_and_report):
+            diagnostic = quality.format_failure_diagnostic(self.args, self.command, RuntimeError("drift"))
+        self.assertEqual(diagnostic.count("preview timed out"), 1)
+
+    def test_real_deadline_kills_the_child_and_raises_a_timeout(self):
+        killed = []
+
+        class Process:
+            returncode = None
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                killed.append(True)
+
+            def wait(self, timeout=None):
+                return 0
+
+        with mock.patch.object(quality, "FORMAT_DIAGNOSTIC_TIMEOUT", 0), \
+                mock.patch.object(quality.subprocess, "Popen", return_value=Process()):
+            with self.assertRaises(quality.subprocess.TimeoutExpired):
+                quality.run_format_preview(self.command, cwd=self.root, env={})
+        self.assertTrue(killed)
+        self.assertEqual(list(self.scratch.glob("qfli-format-preview-*")), [])
+
+    def test_timeout_cleanup_errors_do_not_replace_the_timeout(self):
+        for operation in ("kill", "wait"):
+            with self.subTest(operation=operation):
+                process = mock.Mock()
+                process.poll.return_value = None
+                if operation == "kill":
+                    process.kill.side_effect = OSError("kill refused")
+                else:
+                    process.wait.side_effect = quality.subprocess.TimeoutExpired(self.command, 5)
+                with mock.patch.object(quality, "FORMAT_DIAGNOSTIC_TIMEOUT", 0), \
+                        mock.patch.object(quality.subprocess, "Popen", return_value=process):
+                    with self.assertRaises(quality.subprocess.TimeoutExpired):
+                        quality.run_format_preview(self.command, cwd=self.root, env={})
+                process.kill.assert_called_once_with()
+                if operation == "wait":
+                    process.wait.assert_called_once_with(timeout=5)
+
+    def test_nonzero_preview_exit_is_a_preview_failure_not_a_pass(self):
+        class Process:
+            returncode = 65
+
+            def poll(self):
+                return 65
+
+            def kill(self):
+                return None
+
+            def wait(self, timeout=None):
+                return 65
+
+        with mock.patch.object(quality.subprocess, "Popen", return_value=Process()):
+            with self.assertRaisesRegex(RuntimeError, "preview command failed"):
+                quality.run_format_preview(self.command, cwd=self.root, env={})
+
+    def test_nonzero_preview_exit_never_publishes_the_exception_value(self):
+        with mock.patch.object(quality, "run_format_preview",
+                               side_effect=RuntimeError("secret-source-fragment")):
+            diagnostic = quality.format_failure_diagnostic(self.args, self.command, RuntimeError("drift"))
+        self.assertIn("preview unavailable", diagnostic)
+        self.assertNotIn("secret-source-fragment", diagnostic)
+
+    def test_links_and_path_escapes_are_refused_before_any_preview(self):
+        self.write(self.APPROVED, "void main() {}\n")
+        with mock.patch.object(quality, "linked", side_effect=lambda path: Path(path).name == Path(self.APPROVED).name):
+            with self.assertRaisesRegex(RuntimeError, "linked"):
+                quality.format_diagnostic_paths(self.root)
+        with mock.patch.object(quality, "FORMAT_DIAGNOSTIC_PATHS", {"test/../../outside_test.dart"}):
+            with self.assertRaisesRegex(RuntimeError, "not a literal root test file"):
+                quality.format_diagnostic_paths(self.root)
+        with mock.patch.object(quality, "FORMAT_DIAGNOSTIC_PATHS", {"lib/main.dart"}):
+            with self.assertRaisesRegex(RuntimeError, "not a literal root test file"):
+                quality.format_diagnostic_paths(self.root)
+        with self.assertRaisesRegex(RuntimeError, "not approved"):
+            quality.format_preview_command(self.command[0], "lib/main.dart")
+
+    def test_unsafe_source_state_is_omitted_without_diffing(self):
+        for state in ("linked", "unsafe", "oversized"):
+            with self.subTest(state=state):
+                with mock.patch.object(quality, "_format_source_snapshot", return_value={"state": state}), \
+                        mock.patch.object(quality, "run_format_preview") as runner:
+                    diagnostic = quality.format_failure_diagnostic(self.args, self.command, RuntimeError("drift"))
+                runner.assert_not_called()
+                self.assertIn("preview omitted (" + state + ")", diagnostic)
+
+    def test_diagnostic_is_bounded_and_redacted_before_publication(self):
+        self.write(self.APPROVED, "// password=not-a-real-password\nvoid main() {}\n")
+        patcher, _ = self.preview(outputs=["x" * 200])
+        with patcher, \
+                mock.patch.object(quality, "print_untrusted") as printed, \
+                mock.patch.object(quality, "annotate") as annotated:
+            report = quality.write_format_failure_diagnostic(self.args, self.command, RuntimeError("drift"))
+        diagnostic = report.read_text(encoding="utf-8")
+        self.assertLessEqual(len(diagnostic.encode()), quality.MAX_FORMAT_DIAGNOSTIC_BYTES)
+        self.assertNotIn("not-a-real-password", diagnostic)
+        published = printed.call_args.args[0]
+        self.assertEqual(published, diagnostic)
+        self.assertEqual(annotated.call_args.args[1], diagnostic)
+
+    def test_diagnostic_failure_cannot_replace_the_strict_format_failure(self):
+        before = (self.root / self.APPROVED).read_bytes()
+        with mock.patch.object(quality, "run", side_effect=RuntimeError("format drift")), \
+                mock.patch.object(quality, "format_failure_diagnostic", side_effect=OSError("preview broke")), \
+                mock.patch.object(quality, "print_untrusted", side_effect=OSError("console failed")), \
+                mock.patch.object(quality, "annotate", side_effect=OSError("annotation failed")):
+            with self.assertRaisesRegex(RuntimeError, "format drift"):
+                quality.execute_check(self.args, self.manifest, "format")
+        self.assertEqual(self.manifest["checks"]["format"]["status"], "failed")
+        self.assertEqual(self.manifest["checks"]["format"]["error"], "format drift")
+        report = self.args.output / "reports/format-diagnostic.txt"
+        self.assertEqual(report.read_text(encoding="utf-8"),
+                         "Dart formatter diagnostic unavailable; original failure retained.\n")
+        self.assertEqual(before, (self.root / self.APPROVED).read_bytes())
+
+    def test_prepare_drift_skips_previews_and_keeps_the_original_failure(self):
+        before = (self.root / self.APPROVED).read_bytes()
+
+        def mutate(command, log, **kwargs):
+            self.write(self.APPROVED, "void main() { }\n")
+            raise RuntimeError("format drift")
+
+        with mock.patch.object(quality, "run", side_effect=mutate), \
+                mock.patch.object(quality, "run_format_preview") as preview:
+            with self.assertRaisesRegex(RuntimeError, "format drift"):
+                quality.execute_check(self.args, self.manifest, "format")
+        # A drifted tree means the preview would describe other bytes.
+        preview.assert_not_called()
+        self.assertNotEqual(before, (self.root / self.APPROVED).read_bytes())
+        self.assertEqual(self.manifest["checks"]["format"]["status"], "failed")
+
+    def test_non_format_stage_has_no_formatter_preview(self):
+        with mock.patch.object(quality, "run", side_effect=RuntimeError("analyze failed")), \
+                mock.patch.object(quality, "write_format_failure_diagnostic") as preview:
+            with self.assertRaisesRegex(RuntimeError, "analyze failed"):
+                quality.execute_check(self.args, self.manifest, "analyze")
+        preview.assert_not_called()
+
+
+class QualityMachineSummaryPublicationTests(QualityFixtures):
+    """Public failure detail without raw protocol publication or success change."""
+
+    def summarize(self, content):
+        path = self.scratch / "protocol.jsonl"
+        path.write_text(content, encoding="utf-8")
+        return quality.machine_summary(path, self.root, ["test/one_test.dart", "test/two_test.dart"])
+
+    def test_summary_prints_bounded_redacted_counts_after_the_evidence_write(self):
+        manifest = self.prepared()
+        published = []
+
+        def capture(text):
+            published.append(text)
+
+        with mock.patch.object(quality, "run_machine", side_effect=self.write_machine_from_command), \
+                mock.patch.object(quality, "print_untrusted", side_effect=capture):
+            quality.execute_check(self.args, manifest, "test")
+        text = "".join(published)
+        self.assertIn("Root test summary:", text)
+        for field in ('"passed": 1', '"skipped": 1', '"failed": 0', '"protocolDone": true'):
+            self.assertIn(field, text)
+        self.assertIn('"rawReportPublished": false', text)
+        # The evidence file stays authoritative and unchanged.
+        evidence = read_json(self.args.output / "reports/root-tests.json")
+        self.assertTrue(evidence["success"])
+        self.assertEqual(manifest["checks"]["test"]["status"], "passed_with_skips")
+
+    def test_failure_error_text_is_redacted_and_bounded_before_printing(self):
+        summary = {"success": False, "passed": 1, "failed": 1, "errors":
+                   ["token=not-a-real-token"] * 200 + ["x" * 10000]}
+        with mock.patch.object(quality, "print_untrusted") as printed:
+            text = quality.publish_machine_summary(summary)
+        self.assertNotIn("not-a-real-token", text)
+        self.assertEqual(text, printed.call_args.args[0]
+                         .replace("Root test summary:\n", "", 1))
+        self.assertLessEqual(len(text.encode()), quality.MAX_MACHINE_SUMMARY_BYTES)
+        self.assertLessEqual(text.count("[sensitive diagnostic line redacted]"),
+                             quality.MAX_MACHINE_SUMMARY_ERRORS)
+        self.assertNotIn("x" * 10000, text)
+
+    def test_publication_never_reraises_into_the_evidence_write(self):
+        manifest = self.prepared()
+        with mock.patch.object(quality, "run_machine", side_effect=self.write_machine_from_command), \
+                mock.patch.object(quality, "publish_machine_summary", side_effect=RuntimeError("print broke")):
+            quality.execute_check(self.args, manifest, "test")
+        self.assertTrue(read_json(self.args.output / "reports/root-tests.json")["success"])
+        self.assertEqual(manifest["checks"]["test"]["status"], "passed_with_skips")
+
+    def test_publication_cannot_weaken_a_failing_protocol(self):
+        manifest = self.prepared()
+
+        def fail(command, log, machine, **kwargs):
+            machine.write_text(self.protocol(failed=True), encoding="utf-8")
+            Path(log).parent.mkdir(parents=True, exist_ok=True)
+            Path(log).write_text("fixture log", encoding="utf-8")
+            return "fixture"
+
+        with mock.patch.object(quality, "run_machine", side_effect=fail), \
+                mock.patch.object(quality, "print_untrusted") as printed:
+            with self.assertRaises(RuntimeError):
+                quality.execute_check(self.args, manifest, "test")
+        self.assertIn('"success": false', printed.call_args.args[0])
+        self.assertEqual(manifest["checks"]["test"]["status"], "failed")
+        self.assertFalse(manifest["checks"]["test"]["summary"]["success"])
+
+    def test_raw_protocol_fields_never_reach_the_public_text(self):
+        summary = self.summarize(self.protocol())
+        summary["skippedTestNames"] = ["private-uri-http://127.0.0.1:1/vm-service/"]
+        summary["rawReportSha256"] = "f" * 64
+        with mock.patch.object(quality, "print_untrusted") as printed:
+            text = quality.publish_machine_summary(summary)
+        self.assertEqual(text, printed.call_args.args[0].replace("Root test summary:\n", "", 1))
+        self.assertNotIn("private-uri", text)
+        self.assertNotIn("vm-service", text)
+        self.assertNotIn("f" * 64, text)
+        self.assertNotIn("native fixture", text)
+        self.assertIn("test/one_test.dart", text)
+
+    def test_non_record_summary_is_rejected_before_printing(self):
+        with mock.patch.object(quality, "print_untrusted") as printed:
+            with self.assertRaisesRegex(RuntimeError, "not a record"):
+                quality.publish_machine_summary(["raw protocol"])
+        printed.assert_not_called()
+
+
 class QualityProtocolAndFinalizationTests(QualityFixtures):
     def completed(self):
         manifest = self.prepared()

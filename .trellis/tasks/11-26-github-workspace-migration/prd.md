@@ -10,10 +10,16 @@ Hand over verified state to its Codex coordinator through Herdr.
 
 The coordinator ruling in
 `D:/MyNewProjects/_orchestra/decisions/qflistudio-rust.md` narrows completion to
-the workspace migration. The 2026-11-28 01:36 `core-ref-wave.md` ruling
-supersedes the core-last hold and pins immutable `CORE_REF` to
-`1ae4674a4b153701b0c3b3ff04b1a1b77a318611`. Make one pin-only commit, pass
-the gate, renew target parity and acknowledgement, and record hosted CI.
+the workspace migration. The 2026-11-28 03:30 `core-ref-wave-2.md` ruling
+replaces the first wave's pin with immutable `CORE_REF`
+`8e031313ffc8d531c5a6b4d131f721f35da04c86`. The brain later required pin-only
+publication, completed at `68723d029dfd9dae8ea91c97b8a26848f116e8cd`. Gate,
+clean target parity and exact-SHA acknowledgement passed before deferred quality
+repairs were restored. Restoration made the source dirty at that recorded point. The separate repair commit requires
+a new gate, parity measurement and acknowledgement. Cloud checks `46072255988`
+passed. Quality `46072256145` passed helpers, preparation and analysis but failed
+formatting and root tests. Installers `46072256031` passed six of seven platform
+jobs; iOS failed on `hashlib.file_digest`. Application quality remains open.
 Do not adopt another core SHA without a new brain-authorized wave. This pin
 does not establish Rust product or SDK compatibility.
 

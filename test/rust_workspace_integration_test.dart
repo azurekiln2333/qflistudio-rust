@@ -213,7 +213,12 @@ void main() {
       );
       expect(scaffold.isDrawerOpen, isTrue);
       scaffold.closeDrawer();
-      await _pumpIoUntil(tester, () => !scaffold.isDrawerOpen);
+      await _pumpIoUntil(
+        tester,
+        () =>
+            !scaffold.isDrawerOpen &&
+            find.byTooltip('打开文件树').hitTestable().evaluate().length == 1,
+      );
       await tester.pump(const Duration(milliseconds: 250));
       expect(
         fixture.entry(fixture.primary, 'primary_helper.rs').hitTestable(),
@@ -244,13 +249,14 @@ void main() {
           summarize('primary', fixture.primary, 'primary_helper.rs'),
           summarize('secondary', fixture.secondary, 'inspect.rs'),
         ].join('; ');
-        return 'drawerOpen=${scaffold.isDrawerOpen}; $roots';
+        final toggle = find.byTooltip('打开文件树');
+        final toggleTotal = toggle.evaluate().length;
+        final toggleHitTestable = toggle.hitTestable().evaluate().length;
+        return 'drawerOpen=${scaffold.isDrawerOpen}; '
+            'toggle=$toggleTotal/$toggleHitTestable; $roots';
       }
 
-      await fixture.showExplorer(
-        tester,
-        failureDetails: drawerDiagnostics,
-      );
+      await fixture.showExplorer(tester, failureDetails: drawerDiagnostics);
       // Restoring a root schedules child directory reads after its src row is
       // visible. Wait for both nested leaves before checking the reopened tree.
       await _pumpIoUntil(
@@ -649,8 +655,11 @@ path = "src/configured.rs"
     WidgetTester tester, {
     String Function()? failureDetails,
   }) async {
-    final toggle = find.byTooltip('打开文件树');
-    if (toggle.evaluate().isNotEmpty) await tester.tap(toggle);
+    if (root(primary).hitTestable().evaluate().isEmpty) {
+      final toggle = find.byTooltip('打开文件树').hitTestable();
+      expect(toggle, findsOneWidget, reason: failureDetails?.call());
+      await tester.tap(toggle);
+    }
     await tester.pump(const Duration(milliseconds: 250));
     await _pumpIoUntil(
       tester,

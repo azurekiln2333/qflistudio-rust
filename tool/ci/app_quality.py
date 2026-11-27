@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 
@@ -52,6 +53,21 @@ MAX_TRACKED_DIAGNOSTIC_PATHS = 2048
 MAX_TRACKED_PATH_BYTES = 96 * 1024
 MAX_SAFE_DIFF_BYTES = 16 * 1024
 MAX_SAFE_DIFF_FILE_BYTES = 256 * 1024
+# Analyzer/workspace formatter failures were reported at hosted run
+# 46014152444; the terminal fixture is included because it is changing here.
+FORMAT_DIAGNOSTIC_PATHS = frozenset({
+    "test/rust_code_analyzer_test.dart",
+    "test/rust_workspace_integration_test.dart",
+    "test/rust_terminal_commands_test.dart",
+})
+MAX_FORMAT_DIAGNOSTIC_PATHS = 8
+MAX_FORMAT_DIAGNOSTIC_FILES = 3
+MAX_FORMAT_DIAGNOSTIC_FILE_BYTES = 256 * 1024
+MAX_FORMAT_DIAGNOSTIC_OUTPUT_BYTES = 256 * 1024
+MAX_FORMAT_DIAGNOSTIC_BYTES = 48 * 1024
+FORMAT_DIAGNOSTIC_TIMEOUT = 120
+MAX_MACHINE_SUMMARY_ERRORS = 30
+MAX_MACHINE_SUMMARY_BYTES = 64 * 1024
 
 
 def require(condition, message):
@@ -303,6 +319,242 @@ def write_tracked_input_diagnostic(args, before, after, before_safe, after_safe,
             emit(diagnostic)
         except Exception:
             pass
+
+
+def format_diagnostic_paths(root):
+    """Return the approved preview names that are tracked and confined.
+
+    Names come from a literal allowlist, never from tool output, and every
+    existing path must stay inside the checkout without links.
+    """
+    root = Path(root).resolve()
+    require(len(FORMAT_DIAGNOSTIC_PATHS) <= MAX_FORMAT_DIAGNOSTIC_PATHS,
+            "Formatter diagnostic allowlist exceeds its bound")
+    names = []
+    for name in sorted(FORMAT_DIAGNOSTIC_PATHS)[:MAX_FORMAT_DIAGNOSTIC_PATHS]:
+        require(re.fullmatch(r"test/[A-Za-z0-9_]+(?:\.dart)", name),
+                "Formatter diagnostic path is not a literal root test file")
+        path = root / name
+        if not path.exists() and not linked(path):
+            continue
+        require(not linked(path), "Formatter diagnostic source is linked: " + name)
+        try:
+            resolved = path.resolve()
+        except OSError as error:
+            raise RuntimeError("Formatter diagnostic source is unresolvable: " + name) from error
+        require(resolved == path and resolved.is_relative_to(root) and path.is_file(),
+                "Formatter diagnostic source escapes the checkout: " + name)
+        names.append(name)
+        if len(names) >= MAX_FORMAT_DIAGNOSTIC_FILES:
+            break
+    return names
+
+
+def _format_source_snapshot(root, name):
+    """Read one approved formatter input and redact it before any diff."""
+    require(name in FORMAT_DIAGNOSTIC_PATHS, "Formatter diagnostic path is not approved")
+    path = Path(root).resolve() / name
+    if linked(path):
+        return {"state": "linked"}
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return {"state": "unresolvable"}
+    if resolved != path or not path.is_file():
+        return {"state": "missing" if not path.exists() else "unsafe"}
+    try:
+        with path.open("rb") as stream:
+            data = stream.read(MAX_FORMAT_DIAGNOSTIC_FILE_BYTES + 1)
+    except OSError:
+        return {"state": "unreadable"}
+    if len(data) > MAX_FORMAT_DIAGNOSTIC_FILE_BYTES:
+        return {"state": "oversized"}
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"state": "binary", "size": len(data)}
+    if "\0" in text:
+        return {"state": "binary", "size": len(data)}
+    return {"state": "text", "size": len(data), "text": safe_diff_text(text)}
+
+
+def format_preview_command(executable, name):
+    """Build one preview command already proven to emit formatted source.
+
+    `--output=show` writes the formatted source to stdout without touching the
+    file, and `--show=none`/`--summary=none` suppress the other stdout lines
+    so the capture contains only formatted source.
+    Leave the exit code alone so a genuine formatter error stays visible.
+    """
+    require(name in FORMAT_DIAGNOSTIC_PATHS, "Formatter preview path is not approved")
+    return [str(executable), "format", "--output=show", "--show=none", "--summary=none", name]
+
+
+def run_format_preview(command, *, cwd, env):
+    """Capture a bounded private stdout snapshot without editing source.
+
+    A regular file avoids waiting for pipe EOF when a descendant inherits
+    stdout. Size polling is not a hard disk quota; stderr is discarded.
+    Each invocation has its own 120-second deadline; up to three files are
+    previewed sequentially, with a separate five-second cleanup wait.
+    """
+    require_hosted_runner()
+    command = [str(value) for value in command]
+    deadline = time.monotonic() + FORMAT_DIAGNOSTIC_TIMEOUT
+    process = None
+    scratch = tempfile.mkdtemp(prefix="qfli-format-preview-", dir=os.environ["RUNNER_TEMP"])
+    try:
+        stdout = Path(scratch) / "stdout.log"
+        with stdout.open("wb", buffering=0) as output:
+            process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                       stdout=output, stderr=subprocess.DEVNULL)
+            while True:
+                if time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(command, FORMAT_DIAGNOSTIC_TIMEOUT)
+                require(stdout.stat().st_size <= MAX_FORMAT_DIAGNOSTIC_OUTPUT_BYTES,
+                        "Formatter preview output exceeds or fails to finish its bound")
+                returncode = process.poll()
+                if returncode is not None:
+                    break
+                time.sleep(0.05)
+        require(returncode == 0, "Formatter preview command failed")
+        data = bytearray()
+        try:
+            size = stdout.stat().st_size
+            with stdout.open("rb") as captured:
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise subprocess.TimeoutExpired(command, FORMAT_DIAGNOSTIC_TIMEOUT)
+                    chunk = captured.read(min(8192, MAX_FORMAT_DIAGNOSTIC_OUTPUT_BYTES + 1 - len(data)))
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    require(len(data) <= MAX_FORMAT_DIAGNOSTIC_OUTPUT_BYTES,
+                            "Formatter preview output exceeds or fails to finish its bound")
+            require(len(data) == size == stdout.stat().st_size,
+                    "Formatter preview output changed while reading")
+        except (OSError, ValueError) as error:
+            raise RuntimeError("Formatter preview output could not be read") from error
+        return bytes(data).decode("utf-8", errors="replace")
+    finally:
+        # Cleanup must not replace a timeout, failed exit or failed read.
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def format_diff(name, before, after):
+    """Diff redacted snapshots of one approved file, keeping every hunk line."""
+    old = before["text"].replace("\r\n", "\n")
+    new = after.replace("\r\n", "\n")
+    if not old.endswith("\n"):
+        old += "\n"
+    if not new.endswith("\n"):
+        new += "\n"
+    lines = list(difflib.unified_diff(old.splitlines(keepends=True), new.splitlines(keepends=True),
+                                      fromfile="a/" + name, tofile="formatted/" + name, n=3))
+    return "".join(lines)
+
+
+def format_failure_diagnostic(args, command, failure):
+    """Collect bounded redacted formatter diffs without changing source files."""
+    root = Path(args.root).resolve()
+    rows = ["Dart format failed; bounded previews for approved root test files:",
+            "Original failure: " + redact(str(failure))[:2000]]
+    executable = str(command[0])
+    try:
+        names = format_diagnostic_paths(root)
+    except RuntimeError as error:
+        return bounded_diagnostic("\n".join(rows + ["Previews refused: " + str(error)]) + "\n",
+                                  MAX_FORMAT_DIAGNOSTIC_BYTES)
+    if not names:
+        rows.append("No approved root test file exists for a preview.")
+    for name in names:
+        before = _format_source_snapshot(root, name)
+        if before.get("state") != "text":
+            rows.append(f"{name}: preview omitted ({before.get('state', 'unknown')})")
+            continue
+        try:
+            stdout = run_format_preview(format_preview_command(executable, name),
+                                        cwd=root, env=command_environment())
+        except subprocess.TimeoutExpired:
+            rows.append(f"{name}: preview timed out")
+            continue
+        except Exception:
+            # Never publish an exception value: a reader may echo source text.
+            rows.append(f"{name}: preview unavailable")
+            continue
+        # Redact the formatted text before diffing. A formatter can move or
+        # duplicate a sensitive value the input snapshot alone would not hide.
+        diff = format_diff(name, before, safe_diff_text(stdout))
+        if diff:
+            rows.append(f"\nSafe formatter diff for {name}:\n{diff}")
+        else:
+            rows.append(f"{name}: no textual delta after redaction")
+    return bounded_diagnostic("\n".join(rows) + "\n", MAX_FORMAT_DIAGNOSTIC_BYTES)
+
+
+def write_format_failure_diagnostic(args, command, failure):
+    """Persist and print only the bounded formatter diagnostic.
+
+    The diagnostic is best effort. The caller keeps the original strict format
+    failure, so a diagnostic fault can never turn a failure into a pass.
+    """
+    report = args.output / "reports/format-diagnostic.txt"
+    try:
+        diagnostic = format_failure_diagnostic(args, command, failure)
+    except Exception:
+        # Never publish exception values: a reader may include source content.
+        diagnostic = "Dart formatter diagnostic unavailable; original failure retained.\n"
+    try:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(diagnostic, encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+    for emit in (print_untrusted, lambda text: annotate(
+            "error", text, heading="Dart format failed; see " + report.name)):
+        try:
+            emit(diagnostic)
+        except Exception:
+            pass
+    return report
+
+
+def machine_summary_public(summary):
+    """Select the bounded, redacted fields that may leave the runner."""
+    def names(values):
+        return [redact(str(value))[:200] for value in list(values or [])[:MAX_MACHINE_SUMMARY_ERRORS]]
+
+    return {"success": summary.get("success") is True,
+            "scope": "full_root_test_directory",
+            "passed": summary.get("passed", 0), "skipped": summary.get("skipped", 0),
+            "failed": summary.get("failed", 0), "completed": summary.get("completed", 0),
+            "protocolDone": summary.get("protocolDone") is True,
+            "suiteFiles": names(summary.get("suiteFiles")),
+            "missingSuiteFiles": names(summary.get("missingSuiteFiles")),
+            "unfinishedTestIds": names(summary.get("unfinishedTestIds")),
+            "errors": [redact(str(value))[:2000] for value in
+                       list(summary.get("errors") or [])[:MAX_MACHINE_SUMMARY_ERRORS]],
+            "rawReportPublished": False}
+
+
+def publish_machine_summary(summary):
+    """Print bounded redacted counts and errors; never raw protocol or a pass.
+
+    The public job log already needs a login. `print_untrusted` keeps the text
+    from becoming workflow commands, and only these derived fields are printed.
+    """
+    require(isinstance(summary, dict), "Root test summary is not a record")
+    public = machine_summary_public(summary)
+    text = bounded_diagnostic(json.dumps(public, indent=2, sort_keys=True) + "\n",
+                              MAX_MACHINE_SUMMARY_BYTES)
+    print_untrusted("Root test summary:\n" + text)
+    return text
 
 
 def verify_bootstrap(args, *, require_sdk=True):
@@ -649,6 +901,13 @@ def execute_check(args, manifest, stage):
                         raise RuntimeError(f"{failure}; machine evidence unavailable: {error}") from error
                     raise
                 write_json(args.output / "reports/root-tests.json", summary)
+                # Public logs otherwise hide every failure detail behind the
+                # private protocol file. This stays bounded, redacted and does
+                # not alter the strict summary or finalize gate.
+                try:
+                    publish_machine_summary(summary)
+                except Exception:
+                    pass
                 manifest["checks"][stage].update(summary=summary)
                 require(failure is None and summary["success"],
                         str(failure) if failure else "Root tests lack a complete successful protocol or suite coverage")
@@ -661,6 +920,14 @@ def execute_check(args, manifest, stage):
         status = "passed_with_skips" if stage == "test" and summary["skipped"] else "passed"
         manifest["checks"][stage]["status"] = status
     except BaseException as error:
+        # Best-effort formatter context; the strict format failure below is
+        # recorded and re-raised unchanged even when the preview also fails.
+        if stage == "format" and isinstance(error, Exception):
+            try:
+                verify_prepared(args, manifest)
+                write_format_failure_diagnostic(args, command, error)
+            except Exception:
+                pass
         manifest["checks"][stage].update(status="cancelled" if isinstance(error, KeyboardInterrupt) else "failed",
                                            error=redact(str(error))[:4000])
         raise

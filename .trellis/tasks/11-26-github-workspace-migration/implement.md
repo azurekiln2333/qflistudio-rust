@@ -14,10 +14,17 @@
 ## Current migration ruling — 2026-11-27 14:35
 
 Apply `D:/MyNewProjects/_orchestra/decisions/qflistudio-rust.md` under the user's
-approval. The 2026-11-28 01:36 `core-ref-wave.md` ruling supersedes the
-core-last hold and pins immutable `CORE_REF` to
-`1ae4674a4b153701b0c3b3ff04b1a1b77a318611`. Make one pin-only commit,
-pass the gate, renew target parity and acknowledgement, then record hosted CI.
+approval. The 2026-11-28 03:30 `core-ref-wave-2.md` ruling replaces the first
+wave's pin with immutable `CORE_REF` at
+`8e031313ffc8d531c5a6b4d131f721f35da04c86`. The brain later required pin-only
+publication, completed at `68723d029dfd9dae8ea91c97b8a26848f116e8cd`. Gate,
+clean target parity and exact-SHA acknowledgement passed before deferred quality
+repairs were restored. Restoration made the source dirty at that recorded point. Publish the repairs separately
+through a new gate, then renew parity and acknowledgement. Cloud checks
+`46072255988` passed. Quality `46072256145` passed helpers, preparation and
+analysis but failed formatting and root tests. Installers `46072256031` passed
+six of seven platform jobs; iOS failed on `hashlib.file_digest`. Application
+quality and product acceptance remain open.
 Do not adopt another core SHA without a new brain-authorized wave.
 The exact SDK recipe remains fixed. This does not assert final product or
 Rust native-hooks compatibility. Required hosted format, analysis and full root

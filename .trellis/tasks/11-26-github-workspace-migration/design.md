@@ -37,7 +37,8 @@ any deletion; retain unique source in appropriate tracked locations.
 
 ## Git topology and publication
 
-All five currently advertised remote tips are ancestors of source main c999df6.
+At the initial 2026-11-26 audit, all five advertised remote tips were ancestors
+of source main c999df6. This is a historical topology snapshot.
 Recheck before publication. Integrate any newly discovered unique work through a
 reviewed normal merge; do not force-push or invent empty merges.
 
@@ -55,10 +56,17 @@ qflistudio-core. Update Rust-owned path dependencies and lockfile path entries
 together, with all generation/validation performed in cloud where applicable.
 Dart imports and package identity remain qfli_studio_core.
 
-The 2026-11-28 01:36 `core-ref-wave.md` ruling supersedes the core-last hold
-and pins immutable `CORE_REF` to `1ae4674a4b153701b0c3b3ff04b1a1b77a318611`.
-The wave requires one pin-only commit, gate, renewed target parity and
-acknowledgement, then hosted CI. Do not adopt another SHA without a new wave.
+The 2026-11-28 03:30 `core-ref-wave-2.md` ruling replaces the first wave's pin
+with immutable `CORE_REF` at `8e031313ffc8d531c5a6b4d131f721f35da04c86`.
+The brain later required pin-only publication, completed at
+`68723d029dfd9dae8ea91c97b8a26848f116e8cd`. Gate, clean target parity and
+exact-SHA acknowledgement passed before deferred quality repairs were restored.
+Restoration made the source dirty at that recorded point. Publish the repairs separately through a new gate, then
+renew parity and acknowledgement. Cloud checks `46072255988` passed. Quality
+`46072256145` passed helpers, preparation and analysis but failed formatting and
+root tests. Installers `46072256031` passed six of seven platform jobs; iOS failed
+on `hashlib.file_digest`. Application quality and product acceptance remain open.
+Do not adopt another SHA without a new wave.
 Keep the exact reviewed Flutter-OH recipe.
 This selection establishes migration inputs, not final SDK/native-hooks or
 production compatibility. Do not reuse superseded ee83f1c or 573d1b6 pins.
@@ -66,6 +74,9 @@ production compatibility. Do not reuse superseded ee83f1c or 573d1b6 pins.
 All current Rust jobs use the OHOS SDK and preserve the native Huawei view.
 Core's explicit `prepare_flutter_core.py --flavor official` contract applies
 to official Flutter jobs; this workflow set has none and applies no shim.
+Core preparation does not select native ABIs. Preserve Rust's current arm64
+packaging controls and strict HAP inspection unless hosted evidence requires a
+consumer packaging filter.
 
 Workflow `CORE_REF` feeds existing helper `CORE_SHA`/`APPROVED_CORE_SHA` values
 before initialization. A manual `core_sha` must still equal the pinned input.

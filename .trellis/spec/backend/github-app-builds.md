@@ -58,19 +58,28 @@ the installer finalizer as a quality-workflow API.
   `RUNNER_TEMP`. Do not invoke helpers locally to exercise this guard.
 - Bind reports to `GITHUB_REPOSITORY`, `GITHUB_SHA`, `GITHUB_RUN_ID` and
   `GITHUB_RUN_ATTEMPT`. Checkout HEAD must equal the workflow SHA.
-- The 2026-11-28 01:36 `core-ref-wave.md` ruling supersedes the core-last hold.
-  Pin workflow `CORE_REF` to `1ae4674a4b153701b0c3b3ff04b1a1b77a318611`.
+- The 2026-11-28 03:30 `core-ref-wave-2.md` ruling replaces the first wave's pin.
+  Pin workflow `CORE_REF` to `8e031313ffc8d531c5a6b4d131f721f35da04c86`.
   Update only when the brain sends another wave; do not follow arbitrary `main`
   changes. Before `init`,
   derive `APPROVED_CORE_SHA` and default `CORE_SHA` from that pin. An installer
   dispatch `core_sha` must match exactly: 40 lowercase hexadecimal characters.
-  Reject superseded `ee83f1c` and `573d1b6` prefixes. This wave requires one
-  pin-only consumer commit, orchestra gate, target parity and acknowledgement,
-  then hosted CI with explicit failure triage. Record the exact pin and actual
-  wave evidence in `done.json`; source changes alone do not complete the wave.
+  Reject superseded `ee83f1c` and `573d1b6` prefixes. The brain's later instruction
+  required a pin-only commit, published as
+  `68723d029dfd9dae8ea91c97b8a26848f116e8cd`. Gate, clean target parity and the
+  exact-SHA acknowledgement passed before deferred quality repairs were restored.
+  Restoration made the source dirty at that recorded point. Publish those repairs separately through a new gate,
+  then renew parity and acknowledgement. Cloud checks `46072255988` passed;
+  quality `46072256145` passed helpers, preparation and analysis but failed
+  formatting and root tests. Installers `46072256031` passed six of seven
+  platform jobs; iOS failed on `hashlib.file_digest`. Record actual evidence
+  and failure triage in `done.json`; neither application quality nor product
+  acceptance follows from the pin publication.
   All current Rust jobs use the OHOS SDK and retain the native Huawei view.
   Core's `prepare_flutter_core.py --flavor official` is required for official
   Flutter jobs; none is present in this workflow set, so no shim is applied.
+  Core preparation does not select native ABIs. Retain strict arm64 HAP
+  inspection; add a consumer packaging filter only for evidenced ABI drift.
 - Set `CORE_SDK_CONTRACT` to the exact reviewed recipe:
   `flutter-oh-3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7724e60`.
   Keep SDK identity verification. Setting the contract selects the recipe;
@@ -285,6 +294,23 @@ merged-output helper to capture the protocol. Parse the complete private stdout;
 limit accepted protocol to 128 MiB and 1,000,000 events. Publish only bounded,
 redacted stdout/stderr tails, never the raw protocol or raw stderr.
 
+After a strict formatter failure, reverify prepared input identities before
+collecting best-effort diagnostic previews. Preview only the literal analyzer,
+workspace and terminal test paths listed in `FORMAT_DIAGNOSTIC_PATHS`; reject
+links, path escapes, unreadable/binary inputs and oversized snapshots. Use the
+verified Dart executable with `format --output=show --show=none --summary=none`
+and the selected relative filename. Preview commands must not write source.
+Redact complete input/output text before deriving a unified diff. Bound each
+input and captured output to 256 KiB and the published report to 48 KiB.
+Capture preview stdout in a private regular file; discard stderr. Poll output
+size and a 120-second deadline per invocation, with at most five seconds for
+direct-process cleanup. Up to three previews run sequentially; this is not an
+aggregate 120-second budget. Size polling is not a disk quota. Do not wait on
+an inherited pipe handle; reject incomplete or changing-size snapshots.
+Nonzero exit, timeout, incomplete capture or read failure must omit the preview.
+Report, console and annotation errors must preserve the original check failure.
+Never accept a diagnostic preview as the required successful formatter check.
+
 Flutter interleaves singleton arrays with package:test object events. Accept
 only `[{"event":"test.startedProcess","params":{"vmServiceUri":null}}]`,
 where `vmServiceUri` may also be a string, with no additional keys or array
@@ -298,6 +324,13 @@ failed/unfinished cases and exactly one successful protocol completion. Preserve
 skips as `passed_with_skips`, never device/native passes. Publish sanitized
 `reports/root-tests.json` with counts, missing suites, skipped names, errors and
 raw-report hash/size; do not publish raw events.
+
+After writing `reports/root-tests.json`, publish a bounded derived summary to
+the job log so failures outside the raw log tail remain diagnosable. Include
+counts, suite coverage, unfinished IDs and at most 30 redacted errors. Limit
+public summary text to 64 KiB; omit raw protocol, raw hash, test-name fields
+and VM service fields. Public success must derive from the strict summary.
+Printing failure must not change the recorded test result or finalization gate.
 
 Finalization independently verifies all checks and rechecks the persisted root
 test summary against manifest evidence, complete suite coverage and skip status.
@@ -337,6 +370,8 @@ root-test execution pass is established.
 | Missing root suite, incomplete protocol, all-skipped or changed inputs | Quality cannot pass |
 | Valid Flutter started-process notification | Count metadata only; retain every test/process gate |
 | Malformed or unsupported array notification | Reject protocol evidence |
+| Formatter preview timeout, read error or unsafe path | Omit preview; retain original strict format failure |
+| Diagnostic publication fails | Preserve required check status and exception |
 | Legacy console cannot encode a diagnostic character | Escape console representation; retain redacted UTF-8 report and subprocess status |
 | Package/checksum/report publication failure | Revoke candidate success; report-file completion does not prove artifact upload; hosted regressions pending |
 | Native-only/helper-only success | Application, signing, armv7 and device acceptance remain pending |
@@ -390,6 +425,21 @@ Check Windows long-path setup before checkout from the existing workspace.
 These new regressions are authored but unexecuted until the next hosted run.
 The drawer timeout diagnostic retains the 200-attempt budget and all assertions;
 root/src/leaf match counts are diagnostic evidence, not a passing test.
+
+Real terminal command tests use system `cargo`/`rustc` semantic-version output
+when no bundled Windows override is selected. A selected Windows bundle must
+report exact version `1.98.1`. Preserve real delegate claims, exit status,
+stdout/stderr evidence and platform assertions. GNU linker fallback must return
+an empty list on non-Windows hosts; Windows retains all six flag assertions.
+The revised fixtures require hosted execution before any passing claim.
+
+Formatter diagnostic regressions must cover supported stdout-only flags,
+redaction before hunking, path/link refusal, input/output/publication bounds,
+timeout and incomplete capture, and original failure preservation when reporting
+fails. Assert preparation drift skips previews and other check stages do not
+invoke them. Derived root-summary tests must preserve failing protocols, omit
+raw fields and tolerate printing errors. These additions remain UNRUN until a
+new committed hosted helper run executes them.
 
 Vendor-path regressions must accept both explicit root overrides and reject
 each missing override, each wrong vendor path, missing vendor pubspecs, wrong
