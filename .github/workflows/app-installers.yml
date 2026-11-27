@@ -8,7 +8,7 @@ on:
         type: string
         default: ''
       core_sha:
-        description: Optional SHA; must match owner-approved QFLI_APPROVED_CORE_SHA
+        description: Optional SHA; must match the migration-pinned CORE_REF
         type: string
         default: ''
   push:
@@ -36,6 +36,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Update this immutable migration input when qflistudio-core main advances.
+  CORE_REF: 476a30acee21dc486ee2849dd8064a7be665e4d5
   PYTHONDONTWRITEBYTECODE: '1'
   PYTHONUNBUFFERED: '1'
 
@@ -127,9 +129,7 @@ jobs:
     env:
       QFLI_PLATFORM: ${{ matrix.platform }}
       QFLI_ARCH: ${{ matrix.arch }}
-      CORE_SHA: ${{ inputs.core_sha || vars.QFLI_APPROVED_CORE_SHA }}
-      APPROVED_CORE_SHA: ${{ vars.QFLI_APPROVED_CORE_SHA }}
-      CORE_SDK_CONTRACT: ${{ vars.QFLI_CORE_SDK_CONTRACT }}
+      CORE_SDK_CONTRACT: flutter-oh-3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7724e60
       RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,15 +145,29 @@ jobs:
             printf 'PUB_CACHE=%s/qfli-pub-cache\n' "$RUNNER_TEMP"
             printf 'GRADLE_USER_HOME=%s/qfli-gradle\n' "$RUNNER_TEMP"
           } >> "$GITHUB_ENV"
+      - name: Bind migration core pin for application stages
+        # The env context is available at step scope, not job-env scope.
+        env:
+          CORE_SHA: ${{ inputs.core_sha || env.CORE_REF }}
+          APPROVED_CORE_SHA: ${{ env.CORE_REF }}
+        run: |
+          if [[ ! "$CORE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::core_sha must be a 40-character lowercase hexadecimal commit'
+            exit 1
+          fi
+          {
+            printf 'CORE_SHA=%s\n' "$CORE_SHA"
+            printf 'APPROVED_CORE_SHA=%s\n' "$APPROVED_CORE_SHA"
+          } >> "$GITHUB_ENV"
       - name: Initialize source-bound report
         id: init
         run: python tool/ci/app_build.py init
-      - name: Require owner-approved core and SDK contract
+      - name: Verify migration-pinned core and exact SDK identity
         id: preflight
         run: python tool/ci/app_build.py preflight
       # Checkout directory is the editing alias, not the Dart package name.
       # pubspec, vendor override and lock path must use ../qflistudio-core.
-      - name: Check out approved core
+      - name: Check out migration-pinned sibling core
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: azurekiln2333/qflistudio-core

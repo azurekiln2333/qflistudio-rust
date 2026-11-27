@@ -41,7 +41,7 @@ The rescue ledger now preserves 119 authored/evidence copies, totaling
 copies and three exact index duplicates. Rescue classification is complete.
 The directory-local `* -text` rule protects historical raw bytes; publication
 and receiving-clone comparison are separate gates. Keep original source and
-Git objects until the coordinator records those gates and authorizes cleanup.
+Git objects. This migration authorizes inventory only, not deletion.
 See the migration task's `research/preservation-rescue.md` and dated execution
 record. Do not alter the coordinator's raw-byte correction as part of a spec edit.
 
@@ -96,8 +96,10 @@ The receiving clone must use GitHub for both fetch and push endpoints. Measure
 its worktree before updating it. If it is clean, use `git pull --ff-only`; if it
 has changes, preserve and review them before proceeding. Compare source,
 GitHub and destination commit IDs, tree IDs, tracked modes and blob contents,
-plus the ignored authored inventory and portable Trellis files. Do not claim
-clean status or parity until those measurements finish.
+and portable Trellis files. List ignored source-only paths in the cleanup
+procedure; ignored local state need not exist in the receiving clone. Preserve
+its ownership and rescue dispositions separately. Do not claim clean status or
+tracked parity until those measurements finish.
 
 Keep preservation and ownership guards separate from publication. Do not delete
 the old source, generated-output candidates, Git objects or shared storage, and
@@ -111,11 +113,23 @@ owners before any future cleanup decision.
 A successful native-runtime job does not prove a Flutter application installer,
 application tests or target-device execution. Keep these outcomes separate.
 An unsigned IPA/HAP is not a device-installable signed-package pass. Do not mark
-required coverage or a task complete while checks, transfer comparison or
-credentials remain unresolved. Link real cloud evidence and name each blocker
-explicitly. See [Application CI contracts](../backend/github-app-builds.md) for
-core/SDK approval, producer-byte verification, typed OHOS no-sign, bounded
-intermediates and quality-only report semantics. Native/helper success does not
-approve an absent final core SHA, SDK contract or Rust native-hooks recipe.
-Actual application packaging, signing, device validation and Android armv7
-remain pending.
+product coverage complete while its checks or credentials remain unresolved.
+Link real cloud evidence and name each incomplete result explicitly. See
+[Application CI contracts](../backend/github-app-builds.md) for immutable core
+and SDK inputs, producer-byte verification, typed OHOS no-sign, bounded
+intermediates and quality-only report semantics.
+
+The coordinator's 2026-11-27 14:35 ruling limits `done.json` to workspace
+migration. Pin observed core `main` as immutable `CORE_REF`, retain the exact
+reviewed SDK recipe, and require actual hosted Dart formatting, Flutter
+analysis and the complete root suite to pass at the published migration SHA.
+Missing final production core/SDK or Rust native-hooks approval does not block
+this migration pin. It remains unverified product compatibility.
+
+Record latest installer runs per platform with conclusions, artifact names and
+signing states. Missing installer platforms, SDK/native-hooks, signing,
+device/UI, armv7 and receiver-hook evidence remain in the planning-only
+`11-27-rust-compatibility-followups` task and `done.json` notes. Migration
+completion does not close those tasks, waive required migration quality checks,
+or permit deletion. Source/target comparison requires clean tracked HEAD/tree
+parity; differing ignored inventories are expected and must be recorded.

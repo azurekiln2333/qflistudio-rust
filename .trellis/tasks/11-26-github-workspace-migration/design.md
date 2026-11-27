@@ -13,7 +13,7 @@ are both verified as GitHub-only.
 Current Herdr routing:
 - source Codex: w61:p1; Pi: w61:p2, w61:p3, w61:p4, w61:p5
 - destination Codex: w6C:p1; destination workers remain idle until handover
-- core owner: w63:p1; final core integration is an external dependency
+- core owner: w63:p1; production compatibility remains a separate follow-up
 
 ## Preservation inventory
 
@@ -55,13 +55,23 @@ qflistudio-core. Update Rust-owned path dependencies and lockfile path entries
 together, with all generation/validation performed in cloud where applicable.
 Dart imports and package identity remain qfli_studio_core.
 
-Core owner will provide final immutable SHA after wsui integration and cloud
-validation. Do not pin ee83f1c or the stale installer-plan 573d1b6 as final.
-Audit core Flutter/OHOS compatibility before selecting SDKs.
+The approved 2026-11-27 14:35 migration ruling uses an immutable `CORE_REF`
+from live GitHub core `main`, currently
+`476a30acee21dc486ee2849dd8064a7be665e4d5`. Refresh it when core publishes again
+and pass the orchestra gate. Keep the exact reviewed Flutter-OH recipe.
+This selection establishes migration inputs, not final SDK/native-hooks or
+production compatibility. Do not reuse superseded ee83f1c or 573d1b6 pins.
+
+Workflow `CORE_REF` feeds existing helper `CORE_SHA`/`APPROVED_CORE_SHA` values
+before initialization. A manual `core_sha` must still equal the pinned input.
+Keep SDK identity, source cleanliness, dependency-path and provenance checks.
+Required hosted formatting, analysis and the full root suite must actually pass.
+If an unreleased core change alone breaks them, record evidence and pin the last
+passing core SHA rather than relaxing those checks.
 
 patch_upstream_core.sh belongs to qflistudio-next/tool/ci, not shared core.
 It is not currently a Rust file. Do not copy it blindly. If upstream Flutter
-needs an adaptation, review its behavior against the final core and record an
+needs an adaptation, review its behavior against the pinned core and record an
 explicit Rust-owned contract. Existing CI aliases can remain only when every
 checkout/path/override/patch consumer agrees. The new app workflow should use
 the editing layout directly unless an audited SDK contract requires an alias.
@@ -120,8 +130,10 @@ resetting them.
 Compare HEAD and tree IDs, tracked blob IDs/modes and actual worktree diffs.
 Windows LF/CRLF conversion can change raw byte hashes; normalize according to
 Git attributes and report conversion separately from content mismatch.
-Check ignored authored inventory and Trellis links as well as Git status.
-Do not compare build caches as part of source equality.
+Check portable Trellis links and Git status. Inventory ignored source-only
+paths in the cleanup report; ignored files need not be reproduced in the target.
+Keep preservation dispositions and originals. Do not compare local caches as
+part of tracked source equality.
 
 Resolve every cleanup candidate to an absolute path under the old Rust root.
 Reject reparse-point traversal. Cleanup remains inventory-only in this task.
@@ -143,6 +155,15 @@ acknowledgement.
 
 Handover records final GitHub SHA/tree, paths, task hierarchy, cloud run evidence,
 artifact lifetimes/signing limits, unresolved prerequisites and cleanup results.
-The target coordinator acknowledges ownership through Herdr. This parent must
-not be marked complete while required coverage or preservation remains missing.
+The target coordinator acknowledges ownership through Herdr. Migration completion
+requires preservation, clean tracked parity and actual passing hosted migration
+quality checks. Record each latest installer platform outcome and missing
+artifact/signing evidence without claiming platform acceptance.
+
+Per the 2026-11-27 14:35 ruling, SDK/native-hooks compatibility, signing,
+device/UI tests, Android armv7, receiver-hook diagnosis and missing installer
+acceptance are planned separately in
+[`11-27-rust-compatibility-followups`](../11-27-rust-compatibility-followups/prd.md).
+Include them in `done.json` notes. Completing this migration does not complete
+those product tasks or change a failed check into a pass.
 

@@ -11,6 +11,22 @@
   2026-11-27 through Claude w61:p6.
 - [x] Start the applicable task with task.py after the review gate.
 
+## Current migration ruling — 2026-11-27 14:35
+
+Apply `D:/MyNewProjects/_orchestra/decisions/qflistudio-rust.md` under the user's
+approval. Pin live core `main` as immutable `CORE_REF`, currently
+`476a30acee21dc486ee2849dd8064a7be665e4d5`; refresh when core publishes again.
+The exact SDK recipe remains fixed. This does not assert final product or
+Rust native-hooks compatibility. Required hosted format, analysis and full root
+tests must pass at the published migration revision. Record genuine failures.
+
+Create and retain the independent planning-only
+[`11-27-rust-compatibility-followups`](../11-27-rust-compatibility-followups/prd.md).
+It owns SDK/native-hooks, signing, device/UI, armv7, receiver hooks and missing
+installer acceptance. List them in migration `done.json` notes without closing
+the child product tasks. Ignored source-only paths belong in the cleanup
+inventory; they need not match the target. No deletion is authorized.
+
 ## Ordered execution
 
 1. Capture a fresh source/target status and all remote advertised heads.
@@ -27,14 +43,17 @@
    GitHub SHA before continuing.
 5. Prepare CI helper, package and check workflows in disjoint worker ownership.
    Use the existing app-installer and native-runtime child tasks.
-6. Obtain core owner's final SHA/compatibility handoff. Align Rust pubspec,
-   lockfile path metadata, checkout layout, vendor override and any required
-   upstream-Flutter adaptation. Do not run pub get locally.
+6. Read live core GitHub `main` and pin its full SHA as `CORE_REF`. Align Rust
+   pubspec, lockfile paths, checkout layout and vendor override. Keep SDK identity
+   checks. Final production compatibility is a follow-up. Do not run pub get locally.
 7. Complete native and application workflows. Include bounded intermediate
    artifacts, installer/checksum/provenance outputs and cloud checks.
    Preserve explicit Android armv7 and signing prerequisites.
-8. Use GitHub to validate all checks and actual platform builds. Observe each
-   run through gh APIs; fix evidenced failures and rerun affected jobs.
+8. Use GitHub to pass migration format, analysis and full root tests. Observe
+   run logs, fix evidenced source failures and rerun through a new gate commit.
+   If a failure is solely an unreleased core change, record it and pin the last
+   passing core SHA. Record the latest installer run/outcome/artifacts/signing
+   for each platform; missing product acceptance remains a named follow-up.
    Do not download large build artifacts to either local workspace.
 9. Persist run evidence and accurate task progress. The coordinator reviews
    and commits source changes, then requests publication only through the
@@ -50,7 +69,7 @@
     candidate paths and unresolved ownership or preservation evidence.
 12. Commit handover evidence as needed, repeat target pull/comparison, and send
     final handover through Herdr. Obtain receiving Codex acknowledgement.
-    Report remaining external blockers rather than marking them complete.
+    Complete only migration acceptance in `done.json`; list all product follow-ups.
 
 ## Worker ownership during execution
 
@@ -74,7 +93,7 @@ target update and handover. A's explicitly delegated parent-doc edits are
 limited to the two files listed above. Refine exact file ownership before each
 dispatch; workers must preserve other edits and never commit.
 
-## Execution record — 2026-11-27
+## Historical execution record — 2026-11-27, before the 14:35 ruling
 
 The user confirmed execution after the final planning review. Task start
 succeeded and all four existing Pi workers received scoped implementation
@@ -144,9 +163,11 @@ dependency restoration, installer execution or artifact download is permitted.
 - Dart formatting/analysis and root Flutter tests.
 - Applicable native compiler/adapter/package regressions.
 - Controlled Chinese: python scripts/ste-lint-zh.py <changed Chinese document>.
-- Actual six-platform builds and format-appropriate installer checks.
-- Per-package checksum, signing state, source/core/SDK/runtime input identities.
-- Intermediate/final artifact upload and retention checks.
+- Latest six-platform run outcomes and format-appropriate installer evidence;
+  missing coverage is recorded in the planning-only follow-up.
+- Available package checksum, signing state and source/core/SDK/runtime identities.
+- Available intermediate/final artifact and retention evidence, with absent
+  outputs explicitly distinguished from successful publication.
 - Fresh hosted-runner reproduction without local generated files.
 
 ## Review and rollback gates
@@ -155,7 +176,8 @@ dependency restoration, installer execution or artifact download is permitted.
 - No remote branch deletion until ancestry/preservation is proved.
 - No deletion based only on an ignore rule.
 - No unsigned package labelled device-ready.
-- No core final pin before owner handoff.
+- Pin migration inputs to the observed immutable core `main`; do not claim final
+  production compatibility from that selection.
 - No old workspace or shared VHD removal before preservation and ownership.
 - Keep original Git objects and untracked files until their audit is complete.
 - Correct pushed mistakes with a reviewed follow-up or revert.

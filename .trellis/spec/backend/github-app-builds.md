@@ -2,8 +2,10 @@
 
 All commands below run only on GitHub-hosted Actions runners. Read
 [Cloud-only workspace](../guides/cloud-only-workspace.md) first. This contract
-records reviewed source, not executed application validation. Application helper,
-quality, installer, signing and device validation remain pending.
+records reviewed source, not executed application validation. Earlier handoff
+paragraphs marked pending or UNRUN preserve their source-review snapshot.
+Use the migration task's dated cloud evidence for actual run outcomes; this
+specification does not establish a passing helper or application result.
 
 ## 1. Scope / Trigger
 
@@ -19,8 +21,11 @@ host selection, NDK triple, ABI maps, Gradle and Dart loading. Desktop packages
 require system `cargo` and `rustc`; they do not embed the mobile runtime.
 
 Quality runs on Linux/x64. Its format, analysis and full root `test/` results
-are not target-device, native-runtime or installer evidence. Keep parent and
-child tasks `in_progress` until their separate acceptance gates pass.
+are not target-device, native-runtime or installer evidence. The migration
+parent uses the 2026-11-27 14:35 coordinator ruling: required hosted quality
+checks and tracked clone parity must pass; missing product acceptance is listed
+in planning-only `11-27-rust-compatibility-followups` and migration `done.json`.
+Do not close installer/native product tasks merely because migration completes.
 
 ## 2. Signatures (commands)
 
@@ -47,21 +52,28 @@ the installer finalizer as a quality-workflow API.
 
 ## 3. Contracts (environment, schemas and bytes)
 
-### Hosted execution and approval
+### Hosted execution and immutable migration inputs
 
 - Require `GITHUB_ACTIONS=true`, `RUNNER_ENVIRONMENT=github-hosted` and
   `RUNNER_TEMP`. Do not invoke helpers locally to exercise this guard.
 - Bind reports to `GITHUB_REPOSITORY`, `GITHUB_SHA`, `GITHUB_RUN_ID` and
   `GITHUB_RUN_ATTEMPT`. Checkout HEAD must equal the workflow SHA.
-- Workflow variable `QFLI_APPROVED_CORE_SHA` supplies `APPROVED_CORE_SHA` and
-  default `CORE_SHA`. A dispatch `core_sha` must match it exactly: 40 lowercase
-  hexadecimal characters. Reject superseded `ee83f1c` and `573d1b6` prefixes.
-- `QFLI_CORE_SDK_CONTRACT` supplies `CORE_SDK_CONTRACT`. Current source expects
+- Workflow `CORE_REF` is a literal full SHA selected from live GitHub core
+  `main`, currently `476a30acee21dc486ee2849dd8064a7be665e4d5`. Before `init`,
+  derive `APPROVED_CORE_SHA` and default `CORE_SHA` from that pin. An installer
+  dispatch `core_sha` must match exactly: 40 lowercase hexadecimal characters.
+  Reject superseded `ee83f1c` and `573d1b6` prefixes. Update and republish through
+  the orchestra gate when core `main` advances; record a last-passing pin only
+  when an unreleased core change alone causes a documented quality failure.
+- Set `CORE_SDK_CONTRACT` to the exact reviewed recipe:
   `flutter-oh-3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7724e60`.
-  This is a reviewed baseline recipe, not final Rust compatibility approval.
-- No final core SHA, SDK approval or Rust native-hooks recipe has been handed
-  off. Do not populate approval variables from provisional core main. A known
-  provisional SHA or passing core-only checks cannot satisfy this gate.
+  Keep SDK identity verification. Setting the contract selects the recipe;
+  it does not establish final Rust native-hooks or production compatibility.
+- The coordinator's 2026-11-27 14:35 ruling authorizes these migration inputs
+  without the former repository approval-variable prerequisite. The existing
+  `APPROVED_CORE_SHA` interface represents the migration pin. Its legacy
+  approval field does not establish product acceptance. SDK/native-hooks,
+  signing/device, armv7 and receiver hooks remain planning-only follow-ups.
 - Check out sibling `qflistudio-core` from `azurekiln2333/qflistudio-core`.
   Keep Dart name `qfli_studio_core`. Pubspec, committed lockfile and resolved
   package configuration must agree on `../qflistudio-core` and its
@@ -232,7 +244,7 @@ root-test execution pass is established.
 | Condition | Required outcome |
 | --- | --- |
 | Non-hosted invocation | Reject before restore/build/check execution |
-| Missing final core/SDK approval, mismatched SHA or stale paths | Fail preflight/bootstrap; quality reports blocked, not skipped success |
+| Missing or mismatched immutable migration pin/SDK identity, or stale paths | Fail preflight/bootstrap; quality reports blocked, not skipped success |
 | Fork run, wrong source objects, expired runtime or bad checksum | Reject selection/install with source-bound diagnostics |
 | Producer hashes disagree, JNI-only corruption or extra payload | Reject before Flutter embedding |
 | OHOS typed properties malformed or build fails | Fail and restore both original config byte sequences |
@@ -244,12 +256,13 @@ root-test execution pass is established.
 
 ## 5. Good / Base / Bad Cases
 
-- Good: owner approves immutable inputs, a fresh hosted runner verifies the
+- Good: workflows select the reviewed immutable migration inputs, a fresh hosted runner verifies the
   producer-to-package byte chain, checks the exact installer set and publishes
   bounded reports with honest signing/device limits.
-- Base: approval is absent. Independent helper contracts can run; core-bound
+- Base: required pinned inputs are absent. Independent helper contracts can run; core-bound
   application jobs fail with blocked evidence rather than becoming skipped passes.
-- Bad: approve provisional main, trust a recent runtime by name, rehash fabricated
+- Bad: check out mutable main without recording its SHA, claim production approval
+  from the migration pin, trust a recent runtime by name, rehash fabricated
   producer records, supply string `"false"` to Hvigor, upload an inventory as
   intermediate bytes, or label two debug APKs complete Android release coverage.
 
@@ -261,7 +274,7 @@ Run on GitHub-hosted runners only:
 python -m unittest discover -s tool/ci -p 'test_*.py' -v
 ```
 
-Assert hosted guard, target allowlist, core approval/path/lock/SDK identity,
+Assert hosted guard, target allowlist, core pin/path/lock/SDK identity,
 runtime API source/expiry/input-object rejection, safe extraction and duplicate
 handling. Mutate producer adapter/compiler bytes while recomputing surrounding
 record hashes: verification must still reject broken producer bindings. Cover
@@ -283,7 +296,7 @@ no installer-finalizer coupling. B's frozen finalizer source remains under
 review; hosted installer-finalizer regressions are pending.
 
 Validate workflow syntax, immutable action pins and Node 24 action runtimes.
-Then execute real approved-input quality and six-platform application builds,
+Then execute real pinned-input quality and six-platform application builds,
 format-specific installer checks and upload/retention checks. Record app/core
 SHAs, SDK/runtime identities, run/attempt/job results and output digests. No app
 helper or application pass is established by Cloud checks 45894657274 at
@@ -295,7 +308,14 @@ validation remains pending.
 Wrong: choose the latest successful native artifact, verify only its outer hash,
 reuse generic IDs and mark an unsigned HAP plus logs as a completed installer.
 
-Correct: require owner-approved core/SDK inputs, compare exact native input Git
+Correct: require the immutable migration core pin and exact SDK identity, compare exact native input Git
 objects, verify producer and both copied-library byte chains, preserve OHOS ID,
 validate the exact package set and publish final-byte checksums. Report unsigned,
 armv7, device and unexecuted application gates separately.
+
+Migration completion requires actual hosted format, analysis and full root-test
+success at the published SHA. A helper pass cannot replace them. Record latest
+installer run IDs, per-platform outcomes, artifacts and signing state; absent
+platform acceptance remains a named follow-up. Migration `done.json` never
+asserts completion of SDK/native-hooks, signing, device/UI, armv7, receiver-hook
+or installer product acceptance.

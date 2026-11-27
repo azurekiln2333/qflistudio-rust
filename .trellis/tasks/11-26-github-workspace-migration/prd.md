@@ -6,17 +6,39 @@ Preserve Rust source and portable Trellis progress on GitHub. Make the confirmed
 E-drive clone the next working location. Run every build and test on GitHub.
 Hand over verified state to its Codex coordinator through Herdr.
 
-## Confirmed facts
+## Migration acceptance ruling — 2026-11-27 14:35
+
+The coordinator ruling in
+`D:/MyNewProjects/_orchestra/decisions/qflistudio-rust.md` narrows completion to
+the workspace migration. Pin the observed GitHub core `main` as immutable
+`CORE_REF`; the current migration input is
+`476a30acee21dc486ee2849dd8064a7be665e4d5`. Refresh the pin and republish through
+the gate when core `main` advances. This is not final product or SDK approval.
+
+Hosted Dart formatting, Flutter analysis and the full root test suite remain
+required migration checks. Fix real failures and retain their evidence. If an
+unreleased core change alone causes a failure, record it and use the last core
+SHA with passing evidence. Do not skip checks or relabel failures as success.
+
+Record the latest installer run, per-platform conclusion, artifact names and
+signing state. Missing platform acceptance, SDK/native-hooks compatibility,
+signing, device/UI execution, Android armv7 and receiver-hook diagnosis are
+planning-only follow-ups in
+[`11-27-rust-compatibility-followups`](../11-27-rust-compatibility-followups/prd.md).
+Migration `done.json` must list those limits. It does not close product or
+installer acceptance. This ruling supersedes earlier migration gates below.
+
+## Initial audit facts and dependency context
 
 - Source: `D:/MyNewProjects/qfli_rust`.
 - Destination: `E:/MyNewProjects/QFLIProjects/qflistudio-rust`.
 - User approved task creation and this destination on 2026-11-26.
 - Initial source HEAD: `c999df6e75ce0626fe22db04a481a12035629ca0`.
 - Initial GitHub/destination main: `540674ff95a83daa2848ee463f3c6aaf8986f6ff`.
-- Origin fetches GitHub and pushes to GitHub, Gitee, GitLab, GitCode and CNB.
+- Initial origin fetched GitHub and pushed to GitHub, Gitee, GitLab, GitCode and CNB.
 - All five advertised remote branch tips are ancestors of local main.
-- Untracked work includes `11-17-app-installers` and `tool/ci/ci_support.py`.
-- Root ignore rules exclude specs, workflow, scripts, journals and agent helpers.
+- Initially untracked work included `11-17-app-installers` and `tool/ci/ci_support.py`.
+- Initial root ignore rules excluded specs, workflow, scripts, journals and agent helpers.
 - At the initial audit only `.github/workflows/native-runtime.yml` existed.
   Application installer and quality workflows now have source implementation;
   their actual hosted validation remains pending. Native success never proves
@@ -39,27 +61,30 @@ Hand over verified state to its Codex coordinator through Herdr.
   outputs, session runtime state and credentials from source commits.
 - R3: Inventory every configured endpoint and branch. Integrate unique reviewed
   work into main without discarding history. Record ancestry evidence.
-- R4: GitHub is authoritative. Push explicitly to GitHub. The destination clone
+- R4: GitHub is authoritative. Publish only through the orchestra push gate. The destination clone
   must have GitHub as its only remote endpoint.
 - R5: Establish durable rules forbidding local builds, tests, dependency
   restoration, formatting tools, installer execution and artifact generation.
   Execute these on GitHub-hosted runners. Local Git, inventory and edits remain
   permitted. Do not run local pub get to repair a lockfile.
-- R6: Complete Windows, Linux, macOS, iOS, Android and OHOS cloud coverage:
-  native dependencies, required intermediates, Flutter outputs, installers,
-  cloud checks, checksums and provenance.
+- R6: Pass hosted migration quality checks and record Windows, Linux, macOS,
+  iOS, Android and OHOS coverage: native inputs, intermediates, Flutter outputs,
+  installers, checksums and provenance. Missing platform acceptance remains an
+  explicit product follow-up rather than a migration-completion blocker.
 - R7: Record signing and installation status exactly. An unsigned IPA/HAP is
   not evidence of a device-installable signed package. Inspect credential
   metadata only and expose signing prerequisites in workflows and handover.
 - R8: Record real run IDs, app/core SHAs, per-job results, artifact retention and
-  installer checks. External missing credentials or failed jobs remain explicit
-  incomplete acceptance items; never fabricate successful coverage.
+  installer checks. Missing credentials and failed installer jobs remain explicit
+  product follow-ups. Failed required migration quality checks must be repaired;
+  never fabricate successful coverage.
 - R9: Pull the preserved GitHub state into the destination and compare commit,
   Git tree, source files and portable Trellis content. Both worktrees must be
-  clean. Ignored authored files cannot silently disappear from the comparison.
-- R10: Inventory obsolete build output and WSL storage. Clean only verified,
-  project-owned generated paths after preservation and comparison. Shared WSL
-  requires cross-product ownership/readiness. Provide exact cleanup steps.
+  clean. List ignored source-only paths in the cleanup inventory. Ignored local
+  state is expected to differ and is not a tracked-parity condition.
+- R10: Inventory obsolete build output and WSL storage. Do not delete or
+  unregister anything. Preserve originals and shared ownership records.
+  Any separately approved external relocation must retain verified copies.
 - R11: Dispatch and communicate through Herdr. Prefer gpt-6.1-sol. Inspect/retry
   concurrency failures, compact/restart exhausted sessions, and fall back to
   deepseek-v4.1-flash only after recovery fails.
@@ -75,11 +100,14 @@ Hand over verified state to its Codex coordinator through Herdr.
 - [ ] A3 (R2,R5): No output/credential enters the outgoing commits. Shared agent
   rules route every build/test and dependency restore to GitHub.
 - [ ] A4 (R6-R8): Six-platform cloud results record intermediate, installer,
-  signing and validation status separately.
+  signing and validation status separately. Required hosted format, analysis
+  and full root tests pass at the published migration SHA; missing product
+  acceptance remains listed in the planning-only follow-up and `done.json`.
 - [ ] A5 (R4,R9): Source HEAD/tree, GitHub main and destination HEAD/tree agree.
   Both Git statuses are clean; destination remotes are GitHub-only.
 - [ ] A6 (R10): Exact cleanup paths have ownership and preservation evidence.
-  Deleted output and remaining shared-storage blockers are recorded.
+  Ignored source-only paths and shared-storage holds are recorded. No deletion
+  or WSL unregistration occurs.
 - [ ] A7 (R11,R12): Destination Codex acknowledges the committed handover.
 
 ## Ownership and scope boundaries
@@ -98,9 +126,10 @@ publication and acquiring paid signing accounts remain outside this task.
 
 - Execution was approved on 2026-11-27 through Claude w61:p6. The task is
   `in_progress`; no further planning-review approval is pending.
-- Obtain the final core handoff before selecting the production CI pin.
+- Select immutable migration `CORE_REF` from live GitHub core `main`; do not
+  represent it as a final production compatibility approval.
 - Audit signing metadata; do not treat absent secrets as a completed installer.
-- Resolve shared WSL ownership before destructive distribution removal.
+- Retain shared WSL ownership information without destructive operations.
 
 ## Planning convergence
 
@@ -111,7 +140,7 @@ This PRD has been consolidated against the design, implementation plan and
 dated research record. The user approved the final plan and execution on
 2026-11-27. Continue the existing `in_progress` task, not a new planning gate.
 
-## Current evidence boundary — 2026-11-27
+## Historical evidence boundary — 2026-11-27, before the 14:35 ruling
 
 Rescue classification is complete: 119 source/evidence copies preserve
 2,329,864 bytes. All 14 unreachable blobs are reconciled as 11 copies and three

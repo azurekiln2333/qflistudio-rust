@@ -11,7 +11,8 @@ on:
 # B's bootstrap evidence stays in build/app-artifacts/app-quality-linux-x64.
 # This helper publishes only build/app-quality/linux-x64, never an installer.
 # Required SDK: 3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7724e60.
-# Final core approval and Rust native-hooks compatibility remain owner gates.
+# Migration core pin: update this SHA when qflistudio-core main advances.
+# SDK and Rust native-hooks compatibility remain documented follow-ups.
 permissions:
   contents: read
 
@@ -20,6 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  CORE_REF: 476a30acee21dc486ee2849dd8064a7be665e4d5
   PYTHONDONTWRITEBYTECODE: '1'
   PYTHONUNBUFFERED: '1'
 
@@ -52,7 +54,7 @@ jobs:
 
   application-quality:
     name: Core-bound format, analysis and full root tests
-    # Intentionally no needs/helper result gate: missing core approval must fail
+    # Intentionally no needs/helper result gate: mismatched inputs must fail
     # this job with a blocked report, rather than turn it into a skipped pass.
     runs-on: ubuntu-24.04
     timeout-minutes: 70
@@ -63,9 +65,7 @@ jobs:
     env:
       QFLI_PLATFORM: linux
       QFLI_ARCH: x64
-      CORE_SHA: ${{ vars.QFLI_APPROVED_CORE_SHA }}
-      APPROVED_CORE_SHA: ${{ vars.QFLI_APPROVED_CORE_SHA }}
-      CORE_SDK_CONTRACT: ${{ vars.QFLI_CORE_SDK_CONTRACT }}
+      CORE_SDK_CONTRACT: flutter-oh-3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7724e60
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
       CI: 'true'
     steps:
@@ -81,19 +81,28 @@ jobs:
           printf '%s\n' \
             "PUB_CACHE=$RUNNER_TEMP/qfli-quality-pub-cache" \
             "GRADLE_USER_HOME=$RUNNER_TEMP/qfli-quality-gradle-cache" >> "$GITHUB_ENV"
+      - name: Bind migration core pin for quality stages
+        # The env context is available at step scope, not job-env scope.
+        env:
+          CORE_SHA: ${{ env.CORE_REF }}
+          APPROVED_CORE_SHA: ${{ env.CORE_REF }}
+        run: |
+          printf '%s\n' \
+            "CORE_SHA=$CORE_SHA" \
+            "APPROVED_CORE_SHA=$APPROVED_CORE_SHA" >> "$GITHUB_ENV"
       - name: Initialize source-bound bootstrap report
         id: init
         run: >-
           python tool/ci/app_build.py init
           --platform linux --arch x64
           --output-dir build/app-artifacts/app-quality-linux-x64
-      - name: Require the same owner-approved core and SDK contract as installers
+      - name: Verify the same migration-pinned core and exact SDK identity as installers
         id: preflight
         run: >-
           python tool/ci/app_build.py preflight
           --platform linux --arch x64
           --output-dir build/app-artifacts/app-quality-linux-x64
-      - name: Check out immutable approved sibling core
+      - name: Check out immutable migration-pinned sibling core
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: azurekiln2333/qflistudio-core
@@ -105,7 +114,7 @@ jobs:
           python tool/ci/app_build.py verify-core
           --platform linux --arch x64
           --output-dir build/app-artifacts/app-quality-linux-x64
-      - name: Prepare the exact approved Flutter-OH tag and revision
+      - name: Prepare the exact pinned Flutter-OH tag and revision
         # B owns the SDK recipe. No copied override or speculative core patch.
         run: >-
           python tool/ci/app_build.py setup-flutter

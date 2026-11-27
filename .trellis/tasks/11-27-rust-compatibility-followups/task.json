@@ -1,0 +1,30 @@
+{
+  "id": "rust-compatibility-followups",
+  "name": "rust-compatibility-followups",
+  "title": "Plan Rust compatibility and release acceptance after migration",
+  "description": "Track SDK/native-hooks, installer coverage, signing, device/UI, Android armv7 and receiver-hook acceptance separately from workspace migration.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "lichengyu",
+  "assignee": "lichengyu",
+  "createdAt": "2026-11-27",
+  "completedAt": null,
+  "branch": "main",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/tasks/11-26-github-workspace-migration/prd.md",
+    ".trellis/tasks/11-17-app-installers/prd.md",
+    ".trellis/tasks/11-17-github-native-build/prd.md"
+  ],
+  "notes": "Planning only under the 2026-11-27 14:35 migration ruling. No implementation, local execution or product acceptance is authorized or claimed by this task.",
+  "meta": {}
+}
