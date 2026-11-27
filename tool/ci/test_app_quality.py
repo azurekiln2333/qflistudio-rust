@@ -24,7 +24,7 @@ class QualityFixtures(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.parent = Path(self.temporary.name)
+        self.parent = Path(self.temporary.name).resolve()
         self.root = self.parent / "qflistudio-rust"
         self.core = self.parent / CORE_DIRECTORY
         self.scratch = self.parent / "runner-temp"
@@ -104,9 +104,10 @@ class QualityFixtures(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
 
     def git_value(self, directory, *arguments):
-        directory = Path(directory)
+        directory = Path(directory).resolve()
         if arguments == ("rev-parse", "HEAD"):
-            return {self.root: SOURCE_SHA, self.core: CORE_SHA, self.sdk: quality.app.FLUTTER_COMMIT}[directory]
+            return {self.root.resolve(): SOURCE_SHA, self.core.resolve(): CORE_SHA,
+                    self.sdk.resolve(): quality.app.FLUTTER_COMMIT}[directory]
         if arguments[0] == "ls-files":
             return "\0".join(self.tracked)
         if arguments[0] in ("status", "diff"):
@@ -149,6 +150,13 @@ class QualityIdentityTests(QualityFixtures):
             self.assertEqual(quality.new_manifest(self.args)["status"], "incomplete")
             with self.assertRaisesRegex(RuntimeError, "GitHub-hosted"):
                 quality.require_hosted_runner()
+
+    def test_fixture_git_identity_uses_resolved_checkout_paths(self):
+        self.assertEqual(self.args.root, self.root.resolve())
+        for directory, expected in ((self.root, SOURCE_SHA), (self.core, CORE_SHA),
+                                    (self.sdk, quality.app.FLUTTER_COMMIT)):
+            alias = directory / ".." / directory.name
+            self.assertEqual(self.git_value(alias, "rev-parse", "HEAD"), expected)
 
     def test_bootstrap_requires_all_owner_and_sdk_stages(self):
         bootstrap = read_json(self.args.bootstrap / "manifest.json")
@@ -379,6 +387,20 @@ class QualityProtocolAndFinalizationTests(QualityFixtures):
                 self.assertFalse(self.summarize(content)["success"])
         self.assertTrue(self.summarize(self.protocol())["success"])
 
+    def test_machine_summary_resolves_root_without_weakening_suite_confinement(self):
+        path = self.scratch / "protocol.jsonl"
+        path.write_text(self.protocol(), encoding="utf-8")
+        alias = self.root / ".." / self.root.name
+        expected = ["test/one_test.dart", "test/two_test.dart"]
+        summary = quality.machine_summary(path, alias, expected)
+        self.assertTrue(summary["success"])
+        self.assertEqual(summary["suiteFiles"], expected)
+        self.assertEqual(summary["missingSuiteFiles"], [])
+        event = {"type": "suite", "suite": {"path": str(self.root / "test/../../outside_test.dart")}}
+        path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "outside root test"):
+            quality.machine_summary(path, alias, expected)
+
     def test_all_skipped_protocol_is_not_a_pass(self):
         events = [json.loads(line) for line in self.protocol().splitlines()]
         for event in events:
@@ -574,6 +596,14 @@ class QualityProtocolAndFinalizationTests(QualityFixtures):
         self.assertIn("build/app-artifacts/app-quality-linux-x64", operational)
         self.assertIn("qflistudio-rust/build/app-quality/linux-x64/", operational)
         self.assertIn("retention-days: 14", operational)
+        self.assertNotIn("${{ runner.temp }}", operational)
+        self.assertIn("PUB_CACHE=$RUNNER_TEMP/qfli-quality-pub-cache", operational)
+        self.assertIn("GRADLE_USER_HOME=$RUNNER_TEMP/qfli-quality-gradle-cache", operational)
+        self.assertIn('>> "$GITHUB_ENV"', operational)
+        application = operational.split("  application-quality:\n", 1)[1]
+        caches = application.index("- name: Configure runner-local dependency caches")
+        self.assertLess(application.index("uses: actions/setup-python@"), caches)
+        self.assertLess(caches, application.index("python tool/ci/app_build.py init"))
         self.assertNotIn("needs:", operational)
         self.assertNotIn("if: ${{ vars.QFLI_APPROVED_CORE_SHA", operational)
 

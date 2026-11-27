@@ -131,8 +131,6 @@ jobs:
       APPROVED_CORE_SHA: ${{ vars.QFLI_APPROVED_CORE_SHA }}
       CORE_SDK_CONTRACT: ${{ vars.QFLI_CORE_SDK_CONTRACT }}
       RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
-      PUB_CACHE: ${{ runner.temp }}/qfli-pub-cache
-      GRADLE_USER_HOME: ${{ runner.temp }}/qfli-gradle
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -141,6 +139,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
+      - name: Set runner-local dependency caches
+        run: |
+          {
+            printf 'PUB_CACHE=%s/qfli-pub-cache\n' "$RUNNER_TEMP"
+            printf 'GRADLE_USER_HOME=%s/qfli-gradle\n' "$RUNNER_TEMP"
+          } >> "$GITHUB_ENV"
       - name: Initialize source-bound report
         id: init
         run: python tool/ci/app_build.py init

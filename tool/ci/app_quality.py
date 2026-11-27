@@ -315,6 +315,7 @@ def run_machine(command, log, machine, *, cwd, env, timeout=2400):
 
 
 def machine_summary(path, root, expected):
+    root = Path(root).resolve()
     require(path.is_file() and not linked(path) and path.stat().st_size <= MAX_MACHINE_BYTES,
             "Root test machine report is absent or exceeds its bound")
     suites = set()
