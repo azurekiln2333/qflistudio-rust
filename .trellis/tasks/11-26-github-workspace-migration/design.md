@@ -6,7 +6,9 @@ The migration parent owns source preservation, portable Trellis rules, Git
 integration, destination comparison, cleanup planning and Herdr handover.
 Existing children own native-runtime and app-installer implementation.
 All agents share one checkout; assign disjoint files and prohibit worker commits.
-The coordinator reviews, stages, commits and pushes explicitly to GitHub.
+The coordinator reviews, stages and commits source changes. Publication uses
+the orchestration push gate only after the source `origin` fetch and push URLs
+are both verified as GitHub-only.
 
 Current Herdr routing:
 - source Codex: w61:p1; Pi: w61:p2, w61:p3, w61:p4, w61:p5
@@ -39,9 +41,9 @@ All five currently advertised remote tips are ancestors of source main c999df6.
 Recheck before publication. Integrate any newly discovered unique work through a
 reviewed normal merge; do not force-push or invent empty merges.
 
-Use the explicit GitHub repository URL and explicit main:main refspec.
-Do not use the source origin name while it contains five push URLs.
-The target already has a GitHub-only origin; verify both fetch and all push URLs.
+Request publication only through the orchestration push gate. Before the gate,
+make the source `origin` GitHub-only and verify its fetch and push URLs. The
+target must retain GitHub-only fetch and push URLs.
 Other mirrors are discovery inputs, not publication targets for this migration.
 Existing mirror branch content is already incorporated; changing their server
 defaults or deleting their branches is unnecessary to preserve source on GitHub.
@@ -111,9 +113,9 @@ packages. No signing material belongs in Git.
 
 ## Comparison and cleanup
 
-After pushing reviewed source/progress, require a clean target and update it
-with a fast-forward pull. If target changed concurrently, preserve and review
-that change instead of resetting it.
+After gate publication, measure the target before updating it. If it is clean,
+use a fast-forward pull. If it has changes, preserve and review them instead of
+resetting them.
 
 Compare HEAD and tree IDs, tracked blob IDs/modes and actual worktree diffs.
 Windows LF/CRLF conversion can change raw byte hashes; normalize according to
@@ -121,10 +123,12 @@ Git attributes and report conversion separately from content mismatch.
 Check ignored authored inventory and Trellis links as well as Git status.
 Do not compare build caches as part of source equality.
 
-Resolve every removal candidate to an absolute path under the old Rust root.
-Reject reparse-point traversal and never delete SDK/Pub junction targets.
-No blanket git clean -fdx, recursive parent deletion or old .git removal.
-Retain package/evidence/native source copies until replacements are verified.
+Resolve every cleanup candidate to an absolute path under the old Rust root.
+Reject reparse-point traversal. Cleanup remains inventory-only in this task.
+Do not delete SDK/Pub junction targets, old source, Git objects or shared
+storage. Approved external relocation is copy-only until a separate owner
+decision permits any later removal. Retain package/evidence/native source
+copies until replacements are verified.
 
 All registered WSL VHDs are outside the Rust roots. Send their inventory to
 owning agents through Herdr; deletion requires their readiness and a validated

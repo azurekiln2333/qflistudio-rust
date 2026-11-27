@@ -20,8 +20,11 @@
    files, generated evidence, packages, source copies and unreachable blobs.
 3. Add durable cloud-only rules to AGENTS/specs and update older local-test
    instructions. Preserve historical task results without inventing completion.
-4. Review and commit source/progress preservation. Push explicitly to GitHub
-   with main:main, then verify the advertised SHA. No ordinary source-origin push.
+4. Review source/progress preservation. Before publication, the coordinator must
+   verify that the source `origin` fetch and push URLs both name GitHub because
+   the orchestration gate selects `origin`. Request publication only through
+   that gate; do not run direct `git push`. Verify the gate result and advertised
+   GitHub SHA before continuing.
 5. Prepare CI helper, package and check workflows in disjoint worker ownership.
    Use the existing app-installer and native-runtime child tasks.
 6. Obtain core owner's final SHA/compatibility handoff. Align Rust pubspec,
@@ -33,12 +36,18 @@
 8. Use GitHub to validate all checks and actual platform builds. Observe each
    run through gh APIs; fix evidenced failures and rerun affected jobs.
    Do not download large build artifacts to either local workspace.
-9. Persist run evidence and accurate task progress. Commit/push final source.
-   Recheck all discovered tips and final main ancestry.
-10. Confirm target remains clean; pull from its GitHub-only origin with ff-only.
-    Compare source/GitHub/target commit, tree, blobs/modes and portable progress.
-11. Finalize exact cleanup inventory. Remove only verified project-owned
-    generated paths after evidence/replacement checks. Coordinate WSL ownership.
+9. Persist run evidence and accurate task progress. The coordinator reviews
+   and commits source changes, then requests publication only through the
+   orchestration gate after verifying source `origin` is GitHub-only. Verify
+   the gate result and recheck discovered tips and final main ancestry.
+10. Measure target status before updating it. If it is clean, pull from its
+    GitHub-only origin with ff-only. If it has changes, preserve and review them
+    before proceeding. Compare source/GitHub/target commit, tree, blobs/modes and
+    portable progress without claiming parity before the comparison completes.
+11. Finalize the exact cleanup inventory only. Do not delete files, old source,
+    Git objects or shared storage, and do not unregister WSL. Relocation to the
+    approved external backup is permitted without deleting originals. Record
+    candidate paths and unresolved ownership or preservation evidence.
 12. Commit handover evidence as needed, repeat target pull/comparison, and send
     final handover through Herdr. Obtain receiving Codex acknowledgement.
     Report remaining external blockers rather than marking them complete.

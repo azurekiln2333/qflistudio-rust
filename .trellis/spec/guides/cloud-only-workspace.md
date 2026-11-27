@@ -85,13 +85,26 @@ Prefer `gpt-6.1-sol`. Inspect/retry transient concurrency failures and
 compact/restart exhausted sessions first. Use `deepseek-v4.1-flash` only after
 those recovery attempts fail under the approved coordination policy.
 
-GitHub is authoritative. Use its explicit repository URL and explicit refspec
-for publication, not the old source `origin` name with multiple push URLs.
-Recheck advertised tips before publication and stop for unreviewed unique work.
-The receiving clone must have only GitHub fetch/push endpoints. Compare commit,
-Git tree, tracked modes/content and ignored authored inventory before handover.
-Do not delete old source, generated-output candidates or shared storage without
-preservation, ownership and replacement evidence. Coordinate shared WSL owners.
+The coordinator reviews and owns Git writes. Publish only through the
+orchestration push gate. Because the gate selects the named `origin`, the
+coordinator must first set the source `origin` fetch and push endpoints to the
+GitHub repository and verify both endpoints. Do not invoke direct `git push`.
+Recheck advertised tips and stop for unreviewed unique work before requesting
+the gate.
+
+The receiving clone must use GitHub for both fetch and push endpoints. Measure
+its worktree before updating it. If it is clean, use `git pull --ff-only`; if it
+has changes, preserve and review them before proceeding. Compare source,
+GitHub and destination commit IDs, tree IDs, tracked modes and blob contents,
+plus the ignored authored inventory and portable Trellis files. Do not claim
+clean status or parity until those measurements finish.
+
+Keep preservation and ownership guards separate from publication. Do not delete
+the old source, generated-output candidates, Git objects or shared storage, and
+do not unregister WSL. Relocate approved material to the external migration
+backup only when the copy and ownership record are complete, while retaining
+the originals. Reject reparse-point traversal and coordinate shared-storage
+owners before any future cleanup decision.
 
 ## Quality and acceptance evidence
 
