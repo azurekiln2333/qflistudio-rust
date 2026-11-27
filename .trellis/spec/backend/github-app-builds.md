@@ -195,6 +195,21 @@ verification may produce `status=success`; Android coverage still remains
 | Windows x64 | Inno Setup EXE, x64 PE, silent hosted install, hashes and uninstall | Unsigned executable |
 | macOS arm64/x64 | DMG with selected architecture and ad hoc app verification | Ad hoc, not notarized |
 
+Hosted platform prerequisites must match the selected package inputs. Linux
+installs `libsecret-1-dev` for the secure-storage plugin. Android split builds
+use Flutter's `split-per-abi=true` Gradle property and omit both app-level NDK
+`abiFilters` assignments in that mode. Keep the explicit arm64/x64 target list,
+runtime inventory checks and final per-APK ABI checks. Non-split builds keep
+the selected NDK filters. Apple architecture verification uses
+`xcrun lipo <executable> -verify_arch <architecture>` so the executable is not
+parsed as another architecture; a failed check must stop packaging.
+
+Shared process diagnostics preserve redacted UTF-8 report bytes. For console
+output, escape only characters that the selected stdout encoding cannot
+represent. A Windows legacy console must not turn successful SDK setup into a
+logging exception. Restore the GitHub stop-command boundary in `finally`,
+and preserve the original nonzero subprocess result in failure reports.
+
 Installer packages are bounded to 8 GiB total. Reports/licenses are bounded to
 2,000 files and 128 MiB. Upload packages/reports as
 `app-installer-<platform>-<arch>` for 14 days. Failure/cancellation must retain a
@@ -239,6 +254,14 @@ merged-output helper to capture the protocol. Parse the complete private stdout;
 limit accepted protocol to 128 MiB and 1,000,000 events. Publish only bounded,
 redacted stdout/stderr tails, never the raw protocol or raw stderr.
 
+Flutter interleaves singleton arrays with package:test object events. Accept
+only `[{"event":"test.startedProcess","params":{"vmServiceUri":null}}]`,
+where `vmServiceUri` may also be a string, with no additional keys or array
+members. Count these as `flutterStartedProcesses` metadata without publishing
+the URI. Reject unsupported or malformed array envelopes. Notifications do
+not supply suite, test completion or successful process evidence, and remain
+subject to the same protocol size and event bounds.
+
 Validate every tracked root test suite, positive passed count, no
 failed/unfinished cases and exactly one successful protocol completion. Preserve
 skips as `passed_with_skips`, never device/native passes. Publish sanitized
@@ -281,6 +304,9 @@ root-test execution pass is established.
 | Missing package, wrong ABI/ID/runtime bytes or absent install evidence | No successful installer publication |
 | Intermediate bound/link/hash violation | Remove partial intermediate output and fail |
 | Missing root suite, incomplete protocol, all-skipped or changed inputs | Quality cannot pass |
+| Valid Flutter started-process notification | Count metadata only; retain every test/process gate |
+| Malformed or unsupported array notification | Reject protocol evidence |
+| Legacy console cannot encode a diagnostic character | Escape console representation; retain redacted UTF-8 report and subprocess status |
 | Package/checksum/report publication failure | Revoke candidate success; report-file completion does not prove artifact upload; hosted regressions pending |
 | Native-only/helper-only success | Application, signing, armv7 and device acceptance remain pending |
 
@@ -316,6 +342,15 @@ Apple source/final hashes, Windows producer paths, guest coverage and JNI-only
 corruption. Cover typed Boolean no-sign configuration and byte-exact restoration
 on success/failure. Assert actual intermediate archive bytes, per-file hashes,
 safe links, limits and partial-output removal.
+
+Cover valid null/string Flutter notification frames, malformed/unknown arrays,
+notification-only streams, event bounds and nonzero process exits. Cover
+cp1252 and UTF-8 consoles, redaction and stop-command restoration after output
+failure. Verify exact Apple lipo argument order and rejection before further
+packaging. Check split Android filters and rejection of unselected runtime
+ABIs. The shared console tests are discovered by the full `tool/ci` suite in
+Cloud checks and App installers; quality's independent helper job selects its
+own `test_app_quality.py` suite.
 
 Vendor-path regressions must accept both explicit root overrides and reject
 each missing override, each wrong vendor path, missing vendor pubspecs, wrong
