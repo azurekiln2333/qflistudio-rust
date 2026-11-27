@@ -39,13 +39,20 @@ class QualityFixtures(unittest.TestCase):
         self.write("analysis_options.yaml", "include: package:flutter_lints/flutter.yaml\n")
         self.write("pubspec.yaml", "name: qfli_rust\nversion: 1.0.0+1\ndependencies:\n"
                    "  qfli_studio_core:\n    path: ../qflistudio-core\n"
-                   "dependency_overrides:\n  re_editor:\n    path: ../qflistudio-core/vendor/re_editor\n")
+                   "dependency_overrides:\n  re_editor:\n    path: ../qflistudio-core/vendor/re_editor\n"
+                   "  xterm:\n    path: ../qflistudio-core/vendor/xterm\n")
         self.write("pubspec.lock", "packages:\n  qfli_studio_core:\n    description:\n"
-                   "      path: ../qflistudio-core\n    source: path\n  re_editor:\n    description:\n"
-                   "      path: ../qflistudio-core/vendor/re_editor\n    source: path\n")
+                   "      path: ../qflistudio-core\n      relative: true\n    source: path\n"
+                   "  re_editor:\n    description:\n      path: ../qflistudio-core/vendor/re_editor\n"
+                   "      relative: true\n    source: path\n"
+                   "  xterm:\n    dependency: \"direct overridden\"\n    description:\n"
+                   "      path: ../qflistudio-core/vendor/xterm\n      relative: true\n"
+                   "    source: path\n    version: \"4.0.0\"\n")
         (self.core / "pubspec.yaml").write_text("name: qfli_studio_core\n", encoding="utf-8")
-        (self.core / "vendor/re_editor").mkdir(parents=True)
-        (self.core / "vendor/re_editor/pubspec.yaml").write_text("name: re_editor\n", encoding="utf-8")
+        for name in ("re_editor", "xterm"):
+            vendor = self.core / "vendor" / name
+            vendor.mkdir(parents=True)
+            (vendor / "pubspec.yaml").write_text("name: " + name + "\n", encoding="utf-8")
         self.engine_files = {"engine.version": "1" * 40, "engine.ohos.version": "2" * 40,
                              "engine.ohos.har.version": "3" * 40}
         for name, value in self.engine_files.items():
@@ -62,6 +69,12 @@ class QualityFixtures(unittest.TestCase):
         lock.write_text("packages: {}\n", encoding="utf-8")
         self.tracked = ["analysis_options.yaml", "pubspec.yaml", "pubspec.lock", "lib/main.dart",
                         "test/one_test.dart", "test/two_test.dart", "integration_test/device_test.dart"]
+        for name in sorted(quality.SAFE_DIFF_PATHS - {"pubspec.yaml", "pubspec.lock"}):
+            self.write(name, "// generated fixture before restore\n")
+            self.tracked.append(name)
+        self.index_blobs = {}
+        self.index_modes = {}
+        self.tracked_status = ""
         environment = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted",
                        "RUNNER_TEMP": str(self.scratch), "GITHUB_SHA": SOURCE_SHA,
                        "GITHUB_REPOSITORY": "owner/rust", "GITHUB_RUN_ID": "100", "GITHUB_RUN_ATTEMPT": "2",
@@ -96,7 +109,8 @@ class QualityFixtures(unittest.TestCase):
         write_json(self.root / ".dart_tool/package_config.json", {"packages": [
             {"name": "qfli_rust", "rootUri": "../"},
             {"name": "qfli_studio_core", "rootUri": "../../qflistudio-core"},
-            {"name": "re_editor", "rootUri": "../../qflistudio-core/vendor/re_editor"}]})
+            {"name": "re_editor", "rootUri": "../../qflistudio-core/vendor/re_editor"},
+            {"name": "xterm", "rootUri": "../../qflistudio-core/vendor/xterm"}]})
 
     def write(self, name, content):
         path = self.root / name
@@ -108,9 +122,21 @@ class QualityFixtures(unittest.TestCase):
         if arguments == ("rev-parse", "HEAD"):
             return {self.root.resolve(): SOURCE_SHA, self.core.resolve(): CORE_SHA,
                     self.sdk.resolve(): quality.app.FLUTTER_COMMIT}[directory]
+        if arguments == ("ls-files", "--stage", "-z"):
+            return "\0".join(f"{self.index_modes.get(name, '100644')} "
+                             f"{self.index_blobs.get(name, 'd' * 40)} 0\t{name}" for name in self.tracked)
         if arguments[0] == "ls-files":
-            return "\0".join(self.tracked)
-        if arguments[0] in ("status", "diff"):
+            names = self.tracked
+            if "--" in arguments:
+                roots = arguments[arguments.index("--") + 1:]
+                names = [name for name in names
+                         if any(name == root or name.startswith(root + "/") for root in roots)]
+            return "\0".join(names)
+        if arguments[0] == "status":
+            return self.tracked_status if directory == self.root else ""
+        if arguments[0] == "diff":
+            self.assertEqual(directory, self.sdk)
+            self.assertEqual(arguments, ("diff", "--name-only", "HEAD", "--"))
             return ""
         if arguments[0] == "show":
             return self.engine_files[arguments[1].split("/")[-1]]
@@ -210,6 +236,9 @@ class QualityIdentityTests(QualityFixtures):
         self.assertEqual(set(manifest["sdkExecutableHashes"]), {"flutter", "dart"})
         self.assertEqual(set(manifest["hostRustTools"]), {"rustc", "cargo"})
         self.assertEqual(manifest["core"]["commit"], CORE_SHA)
+        self.assertEqual(manifest["resolvedDependencies"]["packages"]["xterm"],
+                         str(self.core / "vendor/xterm"))
+        self.assertFalse((self.args.output / "reports/pub-get-input-delta.txt").exists())
         quality.verify_prepared(self.args, manifest)
 
     def test_restore_cannot_silently_rewrite_lockfile(self):
@@ -242,12 +271,211 @@ class QualityIdentityTests(QualityFixtures):
         with self.assertRaisesRegex(RuntimeError, "Resolved package path differs"):
             quality.verify_resolved_paths(self.args)
 
+    def test_resolved_xterm_must_be_present_and_use_the_core_vendor_root(self):
+        path = self.root / ".dart_tool/package_config.json"
+        baseline = read_json(path)
+        for uri in (None, "../../hosted/pub.dev/xterm-4.0.0", "../../qflistudio-core/xterm",
+                    "https://pub.dev/packages/xterm", "//remote/share/xterm",
+                    (self.core / "vendor/xterm").as_uri().replace("file:///", "file://localhost/", 1)):
+            with self.subTest(uri=uri):
+                value = copy.deepcopy(baseline)
+                if uri is None:
+                    value["packages"] = [row for row in value["packages"] if row["name"] != "xterm"]
+                else:
+                    next(row for row in value["packages"] if row["name"] == "xterm")["rootUri"] = uri
+                write_json(path, value)
+                with self.assertRaisesRegex(RuntimeError, "xterm"):
+                    quality.verify_resolved_paths(self.args)
+        write_json(path, baseline)
+        self.assertEqual(quality.verify_resolved_paths(self.args)["packages"]["xterm"],
+                         str(self.core / "vendor/xterm"))
+
+    def test_prepare_rejects_hosted_xterm_before_quality_checks(self):
+        manifest = quality.new_manifest(self.args)
+        config = self.root / ".dart_tool/package_config.json"
+        value = read_json(config)
+        next(row for row in value["packages"] if row["name"] == "xterm")["rootUri"] = "../../hosted/xterm-4.0.0"
+        write_json(config, value)
+        with mock.patch.object(quality, "run", return_value="") as command:
+            with self.assertRaisesRegex(RuntimeError, "Resolved package path differs: xterm"):
+                quality.prepare(self.args, manifest)
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.args[0][1:], ["pub", "get"])
+        self.assertFalse(manifest["prepared"])
+        self.assertTrue(all(row["status"] == "not_run" for row in manifest["checks"].values()))
+
     def test_command_environment_removes_read_tokens(self):
         with mock.patch.dict(os.environ, {"GH_TOKEN": "not-a-real-token", "GITHUB_TOKEN": "not-a-real-token",
                                           "ACTIONS_RUNTIME_TOKEN": "not-a-real-token"}):
             environment = quality.command_environment()
         for name in ("GH_TOKEN", "GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN"):
             self.assertNotIn(name, environment)
+
+
+class QualityRestoreDiagnosticTests(QualityFixtures):
+    def reject_restore(self, mutate, message="restore changed tracked"):
+        manifest = quality.new_manifest(self.args)
+        with mock.patch.object(quality, "run", side_effect=mutate) as command, \
+                mock.patch.object(quality, "print_untrusted") as printed, \
+                mock.patch.object(quality, "annotate") as annotated:
+            with self.assertRaisesRegex(RuntimeError, message):
+                quality.prepare(self.args, manifest)
+        self.assertFalse(manifest["prepared"])
+        self.assertTrue(all(row["status"] == "not_run" for row in manifest["checks"].values()))
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.args[0][1:], ["pub", "get"])
+        report = self.args.output / "reports/pub-get-input-delta.txt"
+        diagnostic = report.read_bytes().decode("utf-8")
+        self.assertLessEqual(report.stat().st_size, quality.MAX_TRACKED_DIAGNOSTIC_BYTES)
+        printed.assert_called_once_with(diagnostic)
+        self.assertEqual(annotated.call_args.args, ("error", diagnostic))
+        return diagnostic
+
+    def test_lock_delta_has_hashes_safe_hunks_and_no_arbitrary_source_values(self):
+        name = "lib/main.dart"
+        self.write(name, "before-arbitrary-sensitive-value\n")
+        before_lock = sha256(self.root / "pubspec.lock")
+        before_source = sha256(self.root / name)
+
+        def mutate(command, log, **kwargs):
+            self.write("pubspec.lock", "packages:\n  new_fixture:\n    version: \"2.0.0\"\n"
+                       "    token: not-a-real-token\n    password: not-a-real-password\n"
+                       "    url: https://user:fake-password@pub.dev/path?secret=fake-query\n")
+            self.write("pubspec.yaml", (self.root / "pubspec.yaml").read_text(encoding="utf-8")
+                       + "# ordinary dependency fixture\n")
+            self.write(name, "after-arbitrary-sensitive-value\n")
+            return ""
+
+        diagnostic = self.reject_restore(mutate)
+        self.assertIn("Changed tracked paths: 3", diagnostic)
+        for path in ("pubspec.lock", "pubspec.yaml", name):
+            self.assertIn(path, diagnostic)
+        for value in (before_lock, before_source, sha256(self.root / "pubspec.lock"), sha256(self.root / name)):
+            self.assertIn(value, diagnostic)
+        self.assertIn("--- a/pubspec.lock", diagnostic)
+        self.assertIn("+++ b/pubspec.lock", diagnostic)
+        self.assertIn('+    version: "2.0.0"', diagnostic)
+        self.assertIn("+# ordinary dependency fixture", diagnostic)
+        for value in ("before-arbitrary-sensitive-value", "after-arbitrary-sensitive-value",
+                      "not-a-real-token", "not-a-real-password", "fake-password", "fake-query"):
+            self.assertNotIn(value, diagnostic)
+        self.assertNotIn("--- a/lib/main.dart", diagnostic)
+
+    def test_generated_only_delta_is_reported_and_rejected_with_unchanged_quality_inputs(self):
+        before = quality.source_inputs(self.root)
+        generated = sorted(quality.SAFE_DIFF_PATHS - {"pubspec.yaml", "pubspec.lock"})
+
+        def mutate(command, log, **kwargs):
+            for name in generated:
+                self.write(name, "// generated fixture after restore\n")
+            return ""
+
+        diagnostic = self.reject_restore(mutate, "restore changed tracked repository inputs")
+        self.assertEqual(quality.source_inputs(self.root), before)
+        self.assertIn("Changed tracked paths: 7", diagnostic)
+        for name in generated:
+            self.assertIn("Safe literal diff for " + name, diagnostic)
+            self.assertIn("+++ b/" + name, diagnostic)
+        self.assertIn("+// generated fixture after restore", diagnostic)
+
+    def test_diagnostic_fits_lock_additions_and_all_registrants_with_explicit_truncation(self):
+        generated = sorted(quality.SAFE_DIFF_PATHS - {"pubspec.yaml", "pubspec.lock"})
+
+        def mutate(command, log, **kwargs):
+            lock = (self.root / "pubspec.lock").read_text(encoding="utf-8")
+            additions = "".join(f"  fixture_{index}:\n    source: hosted\n    version: \"1.0.{index}\"\n"
+                                for index in range(16))
+            self.write("pubspec.lock", lock + additions)
+            for name in generated:
+                self.write(name, "// dependency registration after restore\n" * 3000)
+            return ""
+
+        diagnostic = self.reject_restore(mutate)
+        self.assertIn("fixture_0:", diagnostic)
+        self.assertIn("fixture_15:", diagnostic)
+        for name in generated:
+            self.assertIn("Safe literal diff for " + name, diagnostic)
+        self.assertIn("[tracked input diagnostic truncated]", diagnostic)
+        self.assertNotIn("ordinary secret", quality.bounded_diagnostic("password=ordinary secret\n" + "x" * 2000, 100))
+        self.assertLessEqual(len(quality.bounded_diagnostic("字" * 200, 100).encode("utf-8")), 100)
+
+    def test_redaction_precedes_hunks_even_when_key_header_is_far_from_changed_line(self):
+        before = ("private_key: |\n" + "  fake-old-key-body\n" * 20
+                  + "ordinary: before\n-----BEGIN PRIVATE KEY-----\n"
+                  + "fake-old-pem-body\n" * 20 + "-----END PRIVATE KEY-----\n")
+        after = before.replace("fake-old-key-body", "fake-new-key-body").replace("before", "after")
+        after = after.replace("fake-old-pem-body", "fake-new-pem-body")
+        self.write("pubspec.lock", before)
+
+        def mutate(command, log, **kwargs):
+            self.write("pubspec.lock", after)
+            return ""
+
+        # This case exercises restore diagnostics, not lock-schema validation.
+        with mock.patch.object(quality.app, "verify_core"):
+            diagnostic = self.reject_restore(mutate)
+        self.assertIn("+ordinary: after", diagnostic)
+        for secret in ("fake-old-key-body", "fake-new-key-body", "fake-old-pem-body", "fake-new-pem-body"):
+            self.assertNotIn(secret, diagnostic)
+
+    def test_arbitrary_tracked_removal_has_only_path_and_hash_data(self):
+        name = "config/sensitive.env"
+        self.write(name, "arbitrary-sensitive-value-must-never-print\n")
+        self.tracked.append(name)
+        before = sha256(self.root / name)
+
+        def mutate(command, log, **kwargs):
+            (self.root / name).unlink()
+            return ""
+
+        diagnostic = self.reject_restore(mutate, "restore changed tracked repository inputs")
+        self.assertIn(name, diagnostic)
+        self.assertIn(before, diagnostic)
+        self.assertIn("after:  missing", diagnostic)
+        self.assertNotIn("arbitrary-sensitive-value-must-never-print", diagnostic)
+        self.assertNotIn("Safe literal diff for " + name, diagnostic)
+
+    def test_git_status_only_change_keeps_original_whole_tree_rejection(self):
+        def mutate(command, log, **kwargs):
+            self.tracked_status = " M config/sensitive.env"
+            return ""
+
+        diagnostic = self.reject_restore(mutate, "Tracked application source changed")
+        self.assertIn("Git tracked status (paths only):", diagnostic)
+        self.assertIn("config/sensitive.env", diagnostic)
+
+    def test_diagnostic_write_and_console_failures_cannot_replace_strict_rejection(self):
+        original_write = Path.write_text
+
+        def fail_report(path, *arguments, **kwargs):
+            if path.name == "pub-get-input-delta.txt":
+                raise OSError("arbitrary-diagnostic-error-value")
+            return original_write(path, *arguments, **kwargs)
+
+        def mutate(command, log, **kwargs):
+            self.write("pubspec.lock", "packages: {}\n")
+            return ""
+
+        manifest = quality.new_manifest(self.args)
+        with mock.patch.object(Path, "write_text", fail_report), \
+                mock.patch.object(quality, "run", side_effect=mutate), \
+                mock.patch.object(quality, "print_untrusted", side_effect=OSError("console failed")), \
+                mock.patch.object(quality, "annotate", side_effect=OSError("annotation failed")):
+            with self.assertRaisesRegex(RuntimeError, "restore changed tracked quality inputs"):
+                quality.prepare(self.args, manifest)
+        self.assertFalse(manifest["prepared"])
+
+    def test_unsafe_or_oversized_allowlist_content_is_not_diffed(self):
+        name = "linux/flutter/generated_plugins.cmake"
+        before = quality.tracked_snapshot(self.root)
+        self.write(name, "oversized-sensitive-value" * quality.MAX_SAFE_DIFF_FILE_BYTES)
+        snapshot = quality.safe_diff_snapshot(self.root, before)
+        self.assertEqual(snapshot[name]["state"], "oversized")
+        self.assertNotIn("text", snapshot[name])
+        with mock.patch.object(quality, "linked", side_effect=lambda path: Path(path).name == "pubspec.lock"):
+            snapshot = quality.safe_diff_snapshot(self.root, before)
+        self.assertEqual(snapshot["pubspec.lock"], {"state": "linked"})
+        self.assertEqual(quality.safe_literal_diff("lib/main.dart", {}, {}), "")
 
 
 class QualityCommandTests(QualityFixtures):

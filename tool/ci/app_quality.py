@@ -10,6 +10,7 @@ report finalization; artifact upload success remains a separate workflow outcome
 
 import argparse
 import copy
+import difflib
 import hashlib
 import json
 import os
@@ -23,7 +24,7 @@ import urllib.request
 
 import app_build as app
 from ci_support import (
-    CORE_DIRECTORY, CORE_REPOSITORY, LOG_LIMIT, ROOT, annotate_command_failure,
+    CORE_DIRECTORY, CORE_REPOSITORY, LOG_LIMIT, ROOT, annotate, annotate_command_failure,
     bounded_log, print_untrusted, read_json, redact, report_failure,
     require_hosted_runner, run, sha256, step_summary, write_json,
 )
@@ -36,6 +37,21 @@ MAX_REPORT_FILES = 200
 MAX_MACHINE_BYTES = 128 * 1024**2
 MAX_TEST_EVENTS = 1000000
 INPUT_ROOTS = ("lib", "test", "integration_test", "pubspec.yaml", "pubspec.lock", "analysis_options.yaml")
+SAFE_DIFF_PATHS = frozenset({
+    "pubspec.yaml", "pubspec.lock",
+    "linux/flutter/generated_plugin_registrant.cc",
+    "linux/flutter/generated_plugin_registrant.h",
+    "linux/flutter/generated_plugins.cmake",
+    "windows/flutter/generated_plugin_registrant.cc",
+    "windows/flutter/generated_plugin_registrant.h",
+    "windows/flutter/generated_plugins.cmake",
+    "macos/Flutter/GeneratedPluginRegistrant.swift",
+})
+MAX_TRACKED_DIAGNOSTIC_BYTES = 256 * 1024
+MAX_TRACKED_DIAGNOSTIC_PATHS = 2048
+MAX_TRACKED_PATH_BYTES = 96 * 1024
+MAX_SAFE_DIFF_BYTES = 16 * 1024
+MAX_SAFE_DIFF_FILE_BYTES = 256 * 1024
 
 
 def require(condition, message):
@@ -88,6 +104,205 @@ def source_inputs(root):
 
 def input_identity(rows):
     return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def tracked_snapshot(root):
+    """Capture hashes for every tracked regular file without retaining its contents."""
+    root = Path(root).resolve()
+    entries = app.git_value(root, "ls-files", "--stage", "-z").split("\0")
+    snapshot = {}
+    for entry in sorted(filter(None, entries)):
+        identity, name = entry.split("\t", 1)
+        mode, blob, stage = identity.split()
+        app.safe_relative(name)
+        require(re.fullmatch(r"[0-7]{6}", mode) and re.fullmatch(r"[0-9a-f]{40,64}", blob)
+                and stage == "0", "Malformed or unmerged tracked input")
+        row = {"indexMode": mode, "indexBlob": blob}
+        snapshot[name] = row
+        path = root / name
+        if linked(path):
+            row.update(state="linked")
+            try:
+                row["linkSha256"] = hashlib.sha256(os.fsencode(os.readlink(path))).hexdigest()
+            except OSError:
+                pass
+            continue
+        try:
+            resolved = path.resolve()
+        except OSError:
+            row.update(state="unresolvable")
+            continue
+        if not path.exists():
+            row.update(state="missing")
+        elif resolved != path or not path.is_file():
+            row.update(state="unsafe")
+        else:
+            try:
+                stat = path.stat()
+                row.update(state="file", size=stat.st_size, mode=oct(stat.st_mode), sha256=sha256(path))
+            except OSError:
+                row.update(state="unreadable")
+    return snapshot
+
+
+def safe_diff_text(text):
+    # Redact full PEM blocks, including an unterminated block, before hunking.
+    text = re.sub(r"(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?(?:-----END [^-]*PRIVATE KEY-----|\Z)",
+                  "[private key redacted]", text)
+    # A sensitive YAML field may put its value on following indented lines.
+    lines = []
+    sensitive_indent = None
+    for line in text.splitlines(keepends=True):
+        indentation = len(line) - len(line.lstrip())
+        if sensitive_indent is not None:
+            if not line.strip() or indentation > sensitive_indent:
+                lines.append("[sensitive diagnostic continuation redacted]\n")
+                continue
+            sensitive_indent = None
+        clean = redact(line)
+        if "[sensitive diagnostic line redacted]" in clean:
+            sensitive_indent = indentation
+        lines.append(clean)
+    return "".join(lines)
+
+
+def safe_diff_snapshot(root, tracked):
+    """Retain redacted text only for tracked, literal-diff allowlist paths."""
+    root = Path(root).resolve()
+    snapshot = {}
+    for name in sorted(SAFE_DIFF_PATHS & tracked.keys()):
+        path = root / name
+        if linked(path):
+            snapshot[name] = {"state": "linked"}
+            continue
+        try:
+            resolved = path.resolve()
+        except OSError:
+            snapshot[name] = {"state": "unresolvable"}
+            continue
+        if not path.exists():
+            snapshot[name] = {"state": "missing"}
+            continue
+        if resolved != path or not path.is_file():
+            snapshot[name] = {"state": "unsafe"}
+            continue
+        try:
+            with path.open("rb") as stream:
+                data = stream.read(MAX_SAFE_DIFF_FILE_BYTES + 1)
+        except OSError:
+            snapshot[name] = {"state": "unreadable"}
+            continue
+        if len(data) > MAX_SAFE_DIFF_FILE_BYTES:
+            snapshot[name] = {"state": "oversized"}
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            snapshot[name] = {"state": "binary", "size": len(data)}
+        else:
+            if "\0" in text:
+                snapshot[name] = {"state": "binary", "size": len(data)}
+            else:
+                # Redact complete files before generating context-limited hunks.
+                # A private-key header may otherwise sit outside a diff hunk.
+                snapshot[name] = {"state": "text", "size": len(data), "text": safe_diff_text(text)}
+    return snapshot
+
+
+def snapshot_summary(row):
+    if row is None:
+        return "missing"
+    summary = str(row.get("state", "unknown"))
+    for field in ("size", "mode", "sha256", "indexMode", "indexBlob", "linkSha256"):
+        if field in row:
+            summary += f" {field}={row[field]}"
+    return summary
+
+
+def safe_literal_diff(name, before, after):
+    """Return content only for one exact allowlisted text path."""
+    if name not in SAFE_DIFF_PATHS:
+        return ""
+    before_state = before.get(name, {"state": "missing"})
+    after_state = after.get(name, {"state": "missing"})
+    if before_state.get("state") == "text":
+        old = before_state["text"]
+    elif before_state.get("state") == "missing":
+        old = ""
+    else:
+        return (f"[literal diff omitted: {before_state.get('state')} -> "
+                f"{after_state.get('state')}]\n")
+    if after_state.get("state") == "text":
+        new = after_state["text"]
+    elif after_state.get("state") == "missing":
+        new = ""
+    else:
+        return (f"[literal diff omitted: {before_state.get('state')} -> "
+                f"{after_state.get('state')}]\n")
+    return "".join(difflib.unified_diff(
+        old.splitlines(keepends=True), new.splitlines(keepends=True),
+        fromfile="a/" + name, tofile="b/" + name, n=3))
+
+
+def bounded_diagnostic(text, limit=None):
+    text = redact(text)
+    limit = MAX_TRACKED_DIAGNOSTIC_BYTES if limit is None else limit
+    marker = "\n[tracked input diagnostic truncated]\n"
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    content_limit = max(0, limit - len(marker.encode("utf-8")))
+    marker = marker.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
+    return encoded[:content_limit].decode("utf-8", errors="ignore") + marker
+
+
+def tracked_input_diagnostic(before, after, before_safe, after_safe, status=""):
+    names = sorted(set(before) | set(after))
+    changed = [name for name in names if before.get(name) != after.get(name)]
+    lines = [
+        "Tracked dependency-restore delta (path/hash data; bounded):",
+        f"Changed tracked paths: {len(changed)}",
+    ]
+    for name in changed[:MAX_TRACKED_DIAGNOSTIC_PATHS]:
+        lines.extend((f"{name}", f"  before: {snapshot_summary(before.get(name))}",
+                      f"  after:  {snapshot_summary(after.get(name))}"))
+    if len(changed) > MAX_TRACKED_DIAGNOSTIC_PATHS:
+        lines.append(f"[additional changed paths omitted: {len(changed) - MAX_TRACKED_DIAGNOSTIC_PATHS}]")
+    if not changed:
+        lines.append("No whole-tree path/hash delta was observed.")
+    if status:
+        lines.extend(("", "Git tracked status (paths only):", status))
+    diagnostic = bounded_diagnostic("\n".join(lines) + "\n", MAX_TRACKED_PATH_BYTES)
+    safe_changed = [name for name in sorted(SAFE_DIFF_PATHS & set(changed))
+                    if name in before_safe or name in after_safe]
+    for name in safe_changed:
+        diff = safe_literal_diff(name, before_safe, after_safe)
+        section = f"\nSafe literal diff for {name}:\n" + (diff if diff else "[no textual delta after redaction]\n")
+        diagnostic += bounded_diagnostic(section, MAX_SAFE_DIFF_BYTES)
+    return bounded_diagnostic(diagnostic)
+
+
+def write_tracked_input_diagnostic(args, before, after, before_safe, after_safe, status=""):
+    """Publish a bounded diagnostic while leaving the strict rejection untouched."""
+    report = args.output / "reports/pub-get-input-delta.txt"
+    try:
+        diagnostic = tracked_input_diagnostic(before, after, before_safe, after_safe, status)
+    except Exception:
+        # Never publish exception values: a reader may include source content.
+        diagnostic = "Tracked input diagnostic unavailable; strict rejection retained.\n"
+    try:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(diagnostic, encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+    # Both output channels see only the already-redacted bounded diagnostic.
+    # The public annotation is further bounded by the shared annotation helper.
+    for emit in (print_untrusted, lambda text: annotate(
+            "error", text, heading="Dependency restore changed tracked inputs; see " + report.name)):
+        try:
+            emit(diagnostic)
+        except Exception:
+            pass
 
 
 def verify_bootstrap(args, *, require_sdk=True):
@@ -193,12 +408,14 @@ def verify_resolved_paths(args):
     config = read_json(path)
     packages = {row["name"]: row for row in config.get("packages", [])}
     expected = {"qfli_rust": args.root, "qfli_studio_core": args.root.parent / CORE_DIRECTORY,
-                "re_editor": args.root.parent / CORE_DIRECTORY / "vendor/re_editor"}
+                "re_editor": args.root.parent / CORE_DIRECTORY / "vendor/re_editor",
+                "xterm": args.root.parent / CORE_DIRECTORY / "vendor/xterm"}
     for name, root in expected.items():
         uri = urllib.parse.urlparse(packages.get(name, {}).get("rootUri", ""))
         require(uri.path and uri.scheme in ("", "file"), "Missing or unsupported resolved dependency: " + name)
+        require(not uri.netloc and not uri.query and not uri.fragment,
+                "Remote or qualified resolved dependency is not allowed: " + name)
         if uri.scheme == "file":
-            require(uri.netloc in ("", "localhost"), "Remote file dependency is not allowed")
             resolved = Path(urllib.request.url2pathname(uri.path)).resolve()
         else:
             resolved = (path.parent / urllib.parse.unquote(uri.path)).resolve()
@@ -233,11 +450,28 @@ def prepare(args, manifest):
     manifest.update(source=bootstrap["source"], core=copy.deepcopy(bootstrap["core"]),
                     flutter=copy.deepcopy(bootstrap["flutter"]))
     before = source_inputs(args.root)
+    before_tracked = tracked_snapshot(args.root)
+    before_safe = safe_diff_snapshot(args.root, before_tracked)
     flutter, _ = executables()
     run([flutter, "pub", "get"], args.output / "reports/pub-get.log", cwd=args.root,
         env=command_environment(), timeout=1200)
-    require(source_inputs(args.root) == before,
+    after_tracked = tracked_snapshot(args.root)
+    after_safe = safe_diff_snapshot(args.root, after_tracked)
+    tracked_status = app.git_value(args.root, "status", "--porcelain", "--untracked-files=no")
+    source_error = None
+    try:
+        after = source_inputs(args.root)
+    except Exception as error:
+        source_error = error
+        after = None
+    if source_error is not None or after != before or after_tracked != before_tracked or tracked_status:
+        write_tracked_input_diagnostic(args, before_tracked, after_tracked, before_safe, after_safe, tracked_status)
+    if source_error is not None:
+        raise source_error
+    require(after == before,
             "Dependency restore changed tracked quality inputs; review cloud lockfile changes before retrying")
+    require(after_tracked == before_tracked,
+            "Dependency restore changed tracked repository inputs; review generated-source changes before retrying")
     verify_bootstrap(args)
     manifest["resolvedDependencies"] = verify_resolved_paths(args)
     _, dart = executables()
