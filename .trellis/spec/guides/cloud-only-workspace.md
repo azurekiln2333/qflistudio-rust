@@ -121,15 +121,29 @@ intermediates and quality-only report semantics.
 
 The coordinator's 2026-11-27 14:35 ruling limits `done.json` to workspace
 migration. Pin observed core `main` as immutable `CORE_REF`, retain the exact
-reviewed SDK recipe, and require actual hosted Dart formatting, Flutter
-analysis and the complete root suite to pass at the published migration SHA.
+reviewed SDK recipe, and retain actual hosted Dart formatting, Flutter
+analysis and complete root-suite evidence at the published migration SHA.
+The later 17:00 core-last ruling holds core
+`476a30acee21dc486ee2849dd8064a7be665e4d5` through consumer migration.
+Record `CORE_REF bump after the final core push` as a coordinated follow-up.
 Missing final production core/SDK or Rust native-hooks approval does not block
 this migration pin. It remains unverified product compatibility.
+
+The later 18:50 `ci-decoupled.md` ruling separates workspace handover from CI.
+While one Pi watches runs, finish target fast-forward, clean tracked parity,
+committed agent rules, branch/backup/cleanup records and the exact-SHA receiver
+acknowledgement. Write `migrated.json` with those facts and CI run IDs even when
+CI is pending. Repeat parity and acknowledgement whenever the published SHA changes.
+Write `done.json` only with final-SHA CI evidence and explicit failure triage:
+rerun infrastructure failures once, then fix repeated configuration failures;
+document failures proven to exist at pre-migration GitHub main as follow-ups;
+fix migration-caused path, core, lockfile or registrant failures and pass the
+push gate again. Never change a failed or unexecuted check into a passing claim.
 
 Record latest installer runs per platform with conclusions, artifact names and
 signing states. Missing installer platforms, SDK/native-hooks, signing,
 device/UI, armv7 and receiver-hook evidence remain in the planning-only
 `11-27-rust-compatibility-followups` task and `done.json` notes. Migration
-completion does not close those tasks, waive required migration quality checks,
+completion does not close those tasks or relabel required migration quality checks,
 or permit deletion. Source/target comparison requires clean tracked HEAD/tree
 parity; differing ignored inventories are expected and must be recorded.

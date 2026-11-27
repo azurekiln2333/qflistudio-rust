@@ -15,10 +15,20 @@
 
 Apply `D:/MyNewProjects/_orchestra/decisions/qflistudio-rust.md` under the user's
 approval. Pin live core `main` as immutable `CORE_REF`, currently
-`476a30acee21dc486ee2849dd8064a7be665e4d5`; refresh when core publishes again.
+`476a30acee21dc486ee2849dd8064a7be665e4d5`. The later 17:00 core-last ruling
+holds this pin until the brain starts the final-core consumer bump wave.
 The exact SDK recipe remains fixed. This does not assert final product or
 Rust native-hooks compatibility. Required hosted format, analysis and full root
-tests must pass at the published migration revision. Record genuine failures.
+tests retain exact revision and genuine outcomes under the later 18:50 ruling.
+
+Apply `D:/MyNewProjects/_orchestra/decisions/ci-decoupled.md`: run steps 10-12
+in parallel with CI, using Pis for target/AGENTS review, branch/backup review,
+cleanup records and one CI watcher. The coordinator owns Git writes. Write
+`migrated.json` as soon as non-CI parity and exact-SHA handover are complete.
+Add final-SHA CI evidence to produce `done.json`: rerun infrastructure failures
+once, fix repeated configuration failures, document proven pre-migration
+defects as follow-ups, and fix migration-caused failures through another gate.
+This ordering supersedes any sequential CI wait in the steps below.
 
 Create and retain the independent planning-only
 [`11-27-rust-compatibility-followups`](../11-27-rust-compatibility-followups/prd.md).
@@ -49,8 +59,9 @@ inventory; they need not match the target. No deletion is authorized.
 7. Complete native and application workflows. Include bounded intermediate
    artifacts, installer/checksum/provenance outputs and cloud checks.
    Preserve explicit Android armv7 and signing prerequisites.
-8. Use GitHub to pass migration format, analysis and full root tests. Observe
-   run logs, fix evidenced source failures and rerun through a new gate commit.
+8. Use GitHub to run migration format, analysis and full root tests. One Pi
+   observes logs and applies the 18:50 triage while target steps continue.
+   Fix migration-caused source failures and republish through a new gate commit.
    If a failure is solely an unreleased core change, record it and pin the last
    passing core SHA. Record the latest installer run/outcome/artifacts/signing
    for each platform; missing product acceptance remains a named follow-up.
@@ -69,7 +80,9 @@ inventory; they need not match the target. No deletion is authorized.
     candidate paths and unresolved ownership or preservation evidence.
 12. Commit handover evidence as needed, repeat target pull/comparison, and send
     final handover through Herdr. Obtain receiving Codex acknowledgement.
-    Complete only migration acceptance in `done.json`; list all product follow-ups.
+    Write `migrated.json` without waiting for CI, then `done.json` with final-SHA
+    evidence and triage. List all product follow-ups. Refresh both files and
+    exact-SHA acknowledgement after any later corrective publication.
 
 ## Worker ownership during execution
 

@@ -57,17 +57,21 @@ Dart imports and package identity remain qfli_studio_core.
 
 The approved 2026-11-27 14:35 migration ruling uses an immutable `CORE_REF`
 from live GitHub core `main`, currently
-`476a30acee21dc486ee2849dd8064a7be665e4d5`. Refresh it when core publishes again
-and pass the orchestra gate. Keep the exact reviewed Flutter-OH recipe.
+`476a30acee21dc486ee2849dd8064a7be665e4d5`. The later 17:00 core-last ruling
+holds this pin through consumer migration. A brain-coordinated bump wave after
+final core publication requires another commit, gate and hosted CI.
+Keep the exact reviewed Flutter-OH recipe.
 This selection establishes migration inputs, not final SDK/native-hooks or
 production compatibility. Do not reuse superseded ee83f1c or 573d1b6 pins.
 
 Workflow `CORE_REF` feeds existing helper `CORE_SHA`/`APPROVED_CORE_SHA` values
 before initialization. A manual `core_sha` must still equal the pinned input.
 Keep SDK identity, source cleanliness, dependency-path and provenance checks.
-Required hosted formatting, analysis and the full root suite must actually pass.
-If an unreleased core change alone breaks them, record evidence and pin the last
-passing core SHA rather than relaxing those checks.
+Required hosted formatting, analysis and the full root suite retain real
+outcomes. Apply the later 18:50 CI triage: rerun infrastructure failures once,
+fix repeated configuration failures, record proven pre-migration defects as
+follow-ups, and repair migration-caused failures through another gate commit.
+Do not relax checks or claim unexecuted checks passed.
 
 patch_upstream_core.sh belongs to qflistudio-next/tool/ci, not shared core.
 It is not currently a Rust file. Do not copy it blindly. If upstream Flutter
@@ -155,9 +159,13 @@ acknowledgement.
 
 Handover records final GitHub SHA/tree, paths, task hierarchy, cloud run evidence,
 artifact lifetimes/signing limits, unresolved prerequisites and cleanup results.
-The target coordinator acknowledges ownership through Herdr. Migration completion
-requires preservation, clean tracked parity and actual passing hosted migration
-quality checks. Record each latest installer platform outcome and missing
+The target coordinator acknowledges ownership through Herdr. The 18:50
+`ci-decoupled.md` ruling requires `migrated.json` immediately after preservation,
+clean tracked parity, committed agent rules, branch/backup/cleanup records and
+exact-SHA acknowledgement. Include pending CI IDs; one Pi monitors CI separately.
+Write `done.json` by adding final-SHA CI evidence and the documented triage above.
+Repeat target parity and acknowledgement after each new publication.
+Record each latest installer platform outcome and missing
 artifact/signing evidence without claiming platform acceptance.
 
 Per the 2026-11-27 14:35 ruling, SDK/native-hooks compatibility, signing,

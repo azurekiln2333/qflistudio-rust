@@ -69,8 +69,12 @@ source, historical rescue copies, local-only inventories and shared WSL data.
 ## Migration boundary
 
 Actual hosted Dart formatting, Flutter analysis and the complete root test
-suite are still required by migration. They cannot be deferred here or replaced
-by helper/native success. Migration records the latest installer platform
+suite retain their real evidence; helper/native success cannot replace them.
+The later 18:50 `ci-decoupled.md` ruling permits `migrated.json` before CI ends.
+`done.json` adds final-SHA evidence: rerun infrastructure failures once and fix
+repeated configuration failures, record proven pre-migration defects as
+follow-ups, and fix migration-caused failures through another gate commit.
+Migration records the latest installer platform
 outcomes and lists missing coverage in `done.json`; that file completes only
 the workspace migration. Record the pinned core SHA in that file and list
 `CORE_REF bump after the final core push` in its notes as pending, not blocking.

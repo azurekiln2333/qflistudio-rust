@@ -12,13 +12,21 @@ The coordinator ruling in
 `D:/MyNewProjects/_orchestra/decisions/qflistudio-rust.md` narrows completion to
 the workspace migration. Pin the observed GitHub core `main` as immutable
 `CORE_REF`; the current migration input is
-`476a30acee21dc486ee2849dd8064a7be665e4d5`. Refresh the pin and republish through
-the gate when core `main` advances. This is not final product or SDK approval.
+`476a30acee21dc486ee2849dd8064a7be665e4d5`. The later 17:00 `core-last.md`
+ruling holds this pin until consumers finish. Record `CORE_REF bump after the
+final core push` as a later coordinated follow-up. This is not product or SDK approval.
 
 Hosted Dart formatting, Flutter analysis and the full root test suite remain
-required migration checks. Fix real failures and retain their evidence. If an
-unreleased core change alone causes a failure, record it and use the last core
-SHA with passing evidence. Do not skip checks or relabel failures as success.
+required evidence. The later 18:50 `ci-decoupled.md` ruling requires non-CI
+migration steps to finish first. Write `migrated.json` after clean tracked
+parity, committed agent rules, branch/backup/cleanup records and exact-SHA
+receiver acknowledgement, with pending CI IDs allowed. One Pi watches CI.
+For `done.json`, attach final-SHA evidence and triage: rerun infrastructure
+failures once and fix repeated configuration failures; record defects proven
+to exist at pre-migration GitHub main as follow-ups; fix migration-caused
+path/core/lockfile/registrant failures and publish through the gate again.
+Do not skip checks or relabel failures as success. A new SHA requires renewed
+target comparison and acknowledgement.
 
 Record the latest installer run, per-platform conclusion, artifact names and
 signing state. Missing platform acceptance, SDK/native-hooks compatibility,
@@ -67,7 +75,7 @@ installer acceptance. This ruling supersedes earlier migration gates below.
   restoration, formatting tools, installer execution and artifact generation.
   Execute these on GitHub-hosted runners. Local Git, inventory and edits remain
   permitted. Do not run local pub get to repair a lockfile.
-- R6: Pass hosted migration quality checks and record Windows, Linux, macOS,
+- R6: Record and triage hosted migration quality checks and Windows, Linux, macOS,
   iOS, Android and OHOS coverage: native inputs, intermediates, Flutter outputs,
   installers, checksums and provenance. Missing platform acceptance remains an
   explicit product follow-up rather than a migration-completion blocker.
@@ -76,7 +84,7 @@ installer acceptance. This ruling supersedes earlier migration gates below.
   metadata only and expose signing prerequisites in workflows and handover.
 - R8: Record real run IDs, app/core SHAs, per-job results, artifact retention and
   installer checks. Missing credentials and failed installer jobs remain explicit
-  product follow-ups. Failed required migration quality checks must be repaired;
+  product follow-ups. Migration-caused quality failures must be repaired;
   never fabricate successful coverage.
 - R9: Pull the preserved GitHub state into the destination and compare commit,
   Git tree, source files and portable Trellis content. Both worktrees must be
@@ -101,7 +109,8 @@ installer acceptance. This ruling supersedes earlier migration gates below.
   rules route every build/test and dependency restore to GitHub.
 - [ ] A4 (R6-R8): Six-platform cloud results record intermediate, installer,
   signing and validation status separately. Required hosted format, analysis
-  and full root tests pass at the published migration SHA; missing product
+  and full root tests have final-SHA evidence and the 18:50 failure disposition;
+  missing product
   acceptance remains listed in the planning-only follow-up and `done.json`.
 - [ ] A5 (R4,R9): Source HEAD/tree, GitHub main and destination HEAD/tree agree.
   Both Git statuses are clean; destination remotes are GitHub-only.
