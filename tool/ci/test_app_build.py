@@ -48,6 +48,16 @@ class OrchestrationContracts(unittest.TestCase):
         self.assertEqual(gradle.count("abiFilters.clear()"), 2)
         self.assertEqual(gradle.count("abiFilters += rustAbis"), 2)
 
+    def test_ios_release_build_requests_verbose_unsigned_diagnostics(self):
+        args = argparse.Namespace(platform="ios", arch="arm64", flutter_root=Path("flutter"))
+        command = list(map(str, app.release_command(args, {})))
+
+        self.assertEqual(command[1:3], ["build", "ios"])
+        self.assertIn("--verbose", command)
+        self.assertIn("--no-codesign", command)
+        self.assertNotIn("--codesign", command)
+        self.assertNotIn("--no-pub", command)
+
     def test_linux_installer_runner_installs_secret_service_development_headers(self):
         workflow = (app.ROOT / ".github/workflows/app-installers.yml").read_text(encoding="utf-8")
         install = next(line for line in workflow.splitlines() if "apt-get install --no-install-recommends" in line)
@@ -161,10 +171,13 @@ class OrchestrationContracts(unittest.TestCase):
                         patch.object(app, "run") as command, patch.object(app, "retain_intermediates"):
                     app.build_release(fixture.args, fixture.manifest)
                 self.assertEqual(command.call_count, 2)
+                self.assertNotIn("--no-pub", command.call_args_list[1].args[0])
                 evidence = support.read_json(fixture.args.output / "reports/resolved-core.json")
                 self.assertEqual(evidence["packages"], {name: str((fixture.root / path).resolve())
                                                        for name, path in fixture.paths.items()})
                 self.assertEqual(evidence["packageConfigSha256"], support.sha256(fixture.root / ".dart_tool/package_config.json"))
+                self.assertEqual(evidence["packageConfigSha256BeforeBuild"], evidence["packageConfigSha256"])
+                self.assertEqual(evidence["lockfileSha256BeforeBuild"], evidence["lockfileSha256"])
                 self.assertEqual(evidence["lockfileSha256"], support.sha256(fixture.root / "pubspec.lock"))
 
     def test_release_rejects_missing_hosted_wrong_or_remote_xterm_roots_before_build(self):
@@ -203,6 +216,100 @@ class OrchestrationContracts(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "lockfile path/source for xterm"):
                     app.build_release(fixture.args, fixture.manifest)
             command.assert_called_once()
+
+    def test_release_rejects_post_build_xterm_path_drift_before_compatibility(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.core_dependency_fixture(temporary)
+            calls = 0
+
+            def identity(directory, *arguments):
+                return app.FLUTTER_COMMIT if directory == fixture.args.flutter_root else "b" * 40
+
+            def command(arguments, *args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    config_path = fixture.root / ".dart_tool/package_config.json"
+                    config = support.read_json(config_path)
+                    row = next(row for row in config["packages"] if row["name"] == "xterm")
+                    row["rootUri"] = (fixture.core / "vendor/re_editor").as_uri() + "/"
+                    support.write_json(config_path, config)
+
+            with patch.object(app, "ROOT", fixture.root):
+                with patch.object(app, "git_value", side_effect=identity):
+                    with patch.object(app, "run", side_effect=command) as run_command:
+                        with patch.object(app, "retain_intermediates"):
+                            with self.assertRaisesRegex(RuntimeError, "Resolved dependency path differs: xterm"):
+                                app.build_release(fixture.args, fixture.manifest)
+
+            self.assertEqual(calls, 2)
+            self.assertNotIn("--no-pub", run_command.call_args_list[1].args[0])
+            self.assertEqual(fixture.manifest["core"]["compatibility"], "not_verified")
+            self.assertFalse((fixture.args.output / "reports/intermediate-inventory.json").exists())
+
+    def test_release_rejects_post_build_lockfile_drift_before_compatibility(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.core_dependency_fixture(temporary)
+            calls = 0
+
+            def identity(directory, *arguments):
+                return app.FLUTTER_COMMIT if directory == fixture.args.flutter_root else "b" * 40
+
+            def command(arguments, *args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    lock_path = fixture.root / "pubspec.lock"
+                    lock_path.write_text(fixture.lock.replace("vendor/xterm", "vendor/re_editor"),
+                                         encoding="utf-8")
+
+            with patch.object(app, "ROOT", fixture.root):
+                with patch.object(app, "git_value", side_effect=identity):
+                    with patch.object(app, "run", side_effect=command) as run_command:
+                        with patch.object(app, "retain_intermediates"):
+                            with self.assertRaisesRegex(RuntimeError, "Flutter build changed pubspec.lock"):
+                                app.build_release(fixture.args, fixture.manifest)
+
+            self.assertEqual(calls, 2)
+            self.assertNotIn("--no-pub", run_command.call_args_list[1].args[0])
+            self.assertEqual(fixture.manifest["core"]["compatibility"], "not_verified")
+            self.assertFalse((fixture.args.output / "reports/intermediate-inventory.json").exists())
+
+    def test_release_accepts_package_config_metadata_change_and_records_final_hash(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.core_dependency_fixture(temporary)
+            config_path = fixture.root / ".dart_tool/package_config.json"
+            config_before = support.sha256(config_path)
+            calls = 0
+
+            def identity(directory, *arguments):
+                return app.FLUTTER_COMMIT if directory == fixture.args.flutter_root else "b" * 40
+
+            def command(arguments, *args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    config = support.read_json(config_path)
+                    config["generatorVersion"] = "2.0"
+                    support.write_json(config_path, config)
+
+            with patch.object(app, "ROOT", fixture.root):
+                with patch.object(app, "git_value", side_effect=identity):
+                    with patch.object(app, "run", side_effect=command) as run_command:
+                        with patch.object(app, "retain_intermediates"):
+                            app.build_release(fixture.args, fixture.manifest)
+
+            evidence = support.read_json(fixture.args.output / "reports/resolved-core.json")
+            self.assertEqual(calls, 2)
+            self.assertNotIn("--no-pub", run_command.call_args_list[1].args[0])
+            self.assertEqual(fixture.manifest["core"]["compatibility"],
+                             "this_platform_release_build_only")
+            self.assertEqual(evidence["packageConfigSha256BeforeBuild"], config_before)
+            self.assertNotEqual(evidence["packageConfigSha256"], config_before)
+            self.assertEqual(evidence["packageConfigSha256"], support.sha256(config_path))
+            self.assertEqual(evidence["lockfileSha256BeforeBuild"], evidence["lockfileSha256"])
+            self.assertEqual(evidence["lockfileSha256"], support.sha256(fixture.root / "pubspec.lock"))
+            self.assertEqual(set(evidence["packages"]), set(app.CORE_DEPENDENCY_PATHS))
 
     def test_canonical_safe_paths(self):
         for value in ("../outside", "/absolute", "C:/drive", "a\\b", "a//b", "a/./b", "a\nb", ""):

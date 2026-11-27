@@ -743,17 +743,37 @@ def unsigned_ohos_profile():
 
 def release_command(args, env):
     command = [flutter(args), "build", "apk" if args.platform == "android" else "hap" if args.platform == "ohos" else args.platform,
-               "--release", "--no-pub", "--target", "lib/main.dart"]
+               "--release", "--target", "lib/main.dart"]
     if args.platform == "android":
         command += ["--target-platform", "android-arm64,android-x64", "--split-per-abi"]
     elif args.platform in ("ios", "ohos"):
         command += ["--no-codesign"]
-        if args.platform == "ohos":
+        if args.platform == "ios":
+            command += ["--verbose"]
+        else:
             command += ["--target-platform", "ohos-arm64"]
     elif args.platform == "macos":
         env.update(FLUTTER_XCODE_ARCHS="x86_64" if args.arch == "x64" else "arm64", FLUTTER_XCODE_ONLY_ACTIVE_ARCH="YES",
                    CODE_SIGN_IDENTITY="-", CODE_SIGN_STYLE="Manual")
     return command
+
+
+def resolved_dependency_paths(config_path):
+    config = read_json(config_path)
+    packages = {row["name"]: row for row in config["packages"]}
+    resolved_paths = {}
+    for name, relative in CORE_DEPENDENCY_PATHS.items():
+        expected = (ROOT / relative).resolve()
+        uri = urllib.parse.urlparse(packages.get(name, {}).get("rootUri", ""))
+        require(uri.path and uri.scheme in ("", "file") and not uri.netloc,
+                "Missing or unsupported resolved dependency URI: " + name)
+        if uri.scheme == "file":
+            resolved = Path(urllib.request.url2pathname(uri.path)).resolve()
+        else:
+            resolved = (config_path.parent / urllib.parse.unquote(uri.path)).resolve()
+        require(resolved == expected, "Resolved dependency path differs: " + name)
+        resolved_paths[name] = str(resolved)
+    return resolved_paths
 
 
 def build(args, manifest):
@@ -778,25 +798,21 @@ def build_release(args, manifest):
     shutil.copy2(ROOT / "pubspec.lock", reports / "resolved-pubspec.lock")
     verify_core(args, manifest)
     config_path = ROOT / ".dart_tool/package_config.json"
-    config = read_json(config_path)
-    packages = {row["name"]: row for row in config["packages"]}
-    resolved_paths = {}
-    for name, relative in CORE_DEPENDENCY_PATHS.items():
-        expected = (ROOT / relative).resolve()
-        uri = urllib.parse.urlparse(packages.get(name, {}).get("rootUri", ""))
-        require(uri.path and uri.scheme in ("", "file") and not uri.netloc,
-                "Missing or unsupported resolved dependency URI: " + name)
-        if uri.scheme == "file":
-            resolved = Path(urllib.request.url2pathname(uri.path)).resolve()
-        else:
-            resolved = (config_path.parent / urllib.parse.unquote(uri.path)).resolve()
-        require(resolved == expected, "Resolved dependency path differs: " + name)
-        resolved_paths[name] = str(resolved)
+    resolved_dependency_paths(config_path)
+    package_config_sha256_before_build = sha256(config_path)
+    resolved_lock_sha256 = sha256(ROOT / "pubspec.lock")
+    run(release_command(args, env), reports / "flutter-build.log", env=env, timeout=5400)
+    final_lock_sha256 = sha256(ROOT / "pubspec.lock")
+    require(final_lock_sha256 == resolved_lock_sha256,
+            "Flutter build changed pubspec.lock after dependency verification")
+    resolved_paths = resolved_dependency_paths(config_path)
     write_json(reports / "resolved-core.json", {"coreCommit": manifest["core"]["commit"],
                                                "packageName": "qfli_studio_core", "pathVerified": True,
-                                               "packages": resolved_paths, "packageConfigSha256": sha256(config_path),
-                                               "lockfileSha256": sha256(ROOT / "pubspec.lock")})
-    run(release_command(args, env), reports / "flutter-build.log", env=env, timeout=5400)
+                                               "packages": resolved_paths,
+                                               "packageConfigSha256BeforeBuild": package_config_sha256_before_build,
+                                               "packageConfigSha256": sha256(config_path),
+                                               "lockfileSha256BeforeBuild": resolved_lock_sha256,
+                                               "lockfileSha256": final_lock_sha256})
     manifest["core"]["compatibility"] = "this_platform_release_build_only"
     # Keep bounded evidence of available intermediates, never a compiler/cache tree.
     roots = [ROOT / "build" / args.platform]

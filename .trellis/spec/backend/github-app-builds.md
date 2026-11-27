@@ -119,6 +119,36 @@ The baseline setup-script evidence is qflistudio-next
 `tool/ci/setup_flutter.sh` at `69656b4ab14e706e85907ef4c4205d8cd35a1338`, blob
 `05cb24cc4f0ecc3cbefbf9fe6f8a8e917ac14a05`; its scope is not Rust packaging.
 
+### Release plugin regeneration and hosted diagnostics
+
+Installer `release_command` uses `flutter build <target> --release --target
+lib/main.dart` and allows Flutter's built-in package/tooling regeneration.
+The pinned SDK's `packages.dart` generates unfiltered plugins during `pub get`.
+Its `flutter_command.dart` regenerates release tooling only when pub is enabled.
+Using `--no-pub` leaves Android's generated registrant referencing the
+dev-only `integration_test` plugin while Gradle excludes its release dependency.
+Do not add that test plugin to the production Gradle classpath as a workaround.
+Quality analysis and root tests retain their explicit `--no-pub` contract.
+
+Run and verify explicit preparation first. Capture the resolved lock SHA-256
+and package-config SHA-256 before build. After the release command succeeds,
+require identical lock bytes and revalidate all three canonical package roots.
+Only then record compatibility and intermediates. `resolved-core.json` records
+`lockfileSha256BeforeBuild`, `lockfileSha256`,
+`packageConfigSha256BeforeBuild` and final `packageConfigSha256`.
+Package-config metadata may change while all three roots remain valid.
+
+On hosted Windows, set and read back user-scoped `core.longpaths=true` before
+checkout or dependency cloning. Run that step from `github.workspace`, since
+the job's normal repository working directory does not exist before checkout.
+An ineffective setting must fail the step. This follows the one exhausted
+infrastructure retry; no further unchanged rerun is required.
+
+iOS retains `--no-codesign` and adds `--verbose`. Existing command capture
+redacts its bounded 2 MiB log and publishes only a bounded console tail.
+Generic Development Team advice after Xcode failure is not the underlying
+diagnosis. The added verbosity does not establish a signing fix.
+
 ### Runtime selection and producer-byte provenance
 
 `GH_TOKEN` is needed only for runtime metadata. Optional `RUNTIME_RUN_ID` or
@@ -161,7 +191,7 @@ Clear `app.signingConfigs`, remove product `signingConfig` and
 `compileSdkVersion`, and set `ohos/hvigor/hvigor-config.json5`
 `properties.enableSignTask` to the Boolean `false` in an object. A string value,
 CLI spelling or environment flag alone is not this typed Hvigor contract.
-Build with `flutter build hap --release --no-pub --target lib/main.dart
+Build with `flutter build hap --release --target lib/main.dart
 --no-codesign --target-platform ohos-arm64`. Restore both original files byte
 for byte in `finally`, including on failure. Record unsigned state and never
 include signing credentials. OHOS API26 SDK source is a checksummed third-party
@@ -352,6 +382,14 @@ ABIs. The shared console tests are discovered by the full `tool/ci` suite in
 Cloud checks and App installers; quality's independent helper job selects its
 own `test_app_quality.py` suite.
 
+Assert installer commands allow release plugin regeneration, preserve unsigned
+iOS verbosity, reject post-build lock or vendor-root drift before compatibility,
+and record the final package-config hash after harmless metadata changes.
+Check Windows long-path setup before checkout from the existing workspace.
+These new regressions are authored but unexecuted until the next hosted run.
+The drawer timeout diagnostic retains the 200-attempt budget and all assertions;
+root/src/leaf match counts are diagnostic evidence, not a passing test.
+
 Vendor-path regressions must accept both explicit root overrides and reject
 each missing override, each wrong vendor path, missing vendor pubspecs, wrong
 lock descriptions and registry or escaped resolved roots. Hosted resolution
@@ -380,6 +418,12 @@ helper or application pass is established by Cloud checks 45894657274 at
 validation remains pending.
 
 ## 7. Wrong vs Correct
+
+Wrong: pair unfiltered `flutter pub get` with `flutter build --no-pub`, then
+add the missing dev-only Android plugin to the release classpath.
+
+Correct: let the pinned SDK regenerate release plugins, then verify unchanged
+lock bytes and canonical core/vendor roots before claiming build compatibility.
 
 Wrong: choose the latest successful native artifact, verify only its outer hash,
 reuse generic IDs and mark an unsigned HAP plus logs as a completed installer.

@@ -324,7 +324,7 @@ void main() {
       } on RustNativeFeatureCleanupFailure catch (error) {
         failure = error;
       }
-      final retained = failure!;
+      final retained = failure;
       final entry = fixture.debugger.launches.single;
       try {
         expect(fixture.debugger.events, ['stop-failed', 'stop-failed']);
@@ -428,7 +428,7 @@ void main() {
     } on RustNativeFeatureCleanupFailure catch (error) {
       failure = error;
     }
-    final retained = failure!;
+    final retained = failure;
     final entry = fixture.debugger.launches.single;
     try {
       expect(fixture.debugger.events, ['stop-failed']);

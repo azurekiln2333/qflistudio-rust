@@ -1,5 +1,20 @@
 # Design
 
+## Migration implementation supersession — 2026-11-27
+
+This document preserves the original installer plan. Its target table,
+step ordering, aliases and native armv7 section below are historical scope,
+not implemented acceptance. The current executable contract is
+[`github-app-builds.md`](../../spec/backend/github-app-builds.md) together with
+`.github/workflows/app-installers.yml` and `tool/ci/ci_support.py`.
+Current Android uses `arm64-x64` and two APKs; armv7 is a follow-up. The
+application/core checkout aliases are `qflistudio-rust`/`qflistudio-core`,
+the application timeout is 120 minutes, and helper checks are independent jobs.
+Current source/native/core verification precedes platform builds. No historical
+table or unexecuted design statement establishes a completed installer.
+The Build command list below is updated for release plugin regeneration and
+unsigned iOS diagnostics; hosted acceptance remains required.
+
 ## Boundaries
 
 A new workflow `.github/workflows/app-installers.yml` ("App installers") builds
@@ -164,14 +179,22 @@ never prints the committed one.
 `build` verifies the core and Flutter checkouts, runs `flutter pub get`, keeps
 the resolved `pubspec.lock` as a report and runs one release build:
 
-- android: `flutter build apk --release --no-pub --target lib/main.dart
-  --target-platform android-arm,android-arm64,android-x64 --split-per-abi`
-- ios: `flutter build ios --release --no-pub --no-codesign --target lib/main.dart`
-- ohos: `flutter build hap --release --no-pub --no-codesign --target
+- android: `flutter build apk --release --target lib/main.dart
+  --target-platform android-arm64,android-x64 --split-per-abi`
+- ios: `flutter build ios --release --no-codesign --verbose --target lib/main.dart`
+- ohos: `flutter build hap --release --no-codesign --target
   lib/main.dart --target-platform ohos-arm64`
-- linux, windows, macos: `flutter build <platform> --release --no-pub --target
+- linux, windows, macos: `flutter build <platform> --release --target
   lib/main.dart`; macOS sets `FLUTTER_XCODE_ARCHS` to the job architecture,
   `FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES` and ad hoc manual signing.
+
+The pinned SDK must regenerate release plugin registrations during build.
+`--no-pub` skips that stage and can retain dev-only Android plugin references.
+After build, require the prepared lock SHA-256 unchanged, recheck the canonical
+core and both vendor roots, and record final package-config identity before
+compatibility or intermediate publication. Quality commands keep `--no-pub`.
+The Windows hosted job enables and verifies `core.longpaths` before checkout.
+Verbose iOS output remains bounded/redacted and does not imply signing success.
 
 ## Packages and verification
 

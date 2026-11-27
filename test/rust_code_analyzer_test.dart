@@ -234,7 +234,10 @@ void main() {
           ]),
         ).analyze(_request(project: project.path, active: entry));
         expect(result.unavailableReason, isNull);
-        expect(result.diagnostics.single.severity, CodeDiagnosticSeverity.error);
+        expect(
+          result.diagnostics.single.severity,
+          CodeDiagnosticSeverity.error,
+        );
       });
     }
 

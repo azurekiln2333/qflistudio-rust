@@ -224,7 +224,33 @@ void main() {
         findsNothing,
       );
 
-      await fixture.showExplorer(tester);
+      String drawerDiagnostics() {
+        String summarize(String label, Project project, String leaf) {
+          final root = fixture.root(project);
+          final src = fixture.entry(project, 'src');
+          final leafEntry = fixture.entry(project, leaf);
+
+          String counts(Finder finder) {
+            final total = finder.evaluate().length;
+            final hitTestable = finder.hitTestable().evaluate().length;
+            return '$total/$hitTestable';
+          }
+
+          return '$label(root=${counts(root)}, src=${counts(src)}, '
+              'leaf=${counts(leafEntry)})';
+        }
+
+        final roots = [
+          summarize('primary', fixture.primary, 'primary_helper.rs'),
+          summarize('secondary', fixture.secondary, 'inspect.rs'),
+        ].join('; ');
+        return 'drawerOpen=${scaffold.isDrawerOpen}; $roots';
+      }
+
+      await fixture.showExplorer(
+        tester,
+        failureDetails: drawerDiagnostics,
+      );
       // Restoring a root schedules child directory reads after its src row is
       // visible. Wait for both nested leaves before checking the reopened tree.
       await _pumpIoUntil(
@@ -240,6 +266,7 @@ void main() {
                 .hitTestable()
                 .evaluate()
                 .isNotEmpty,
+        failureDetails: drawerDiagnostics,
       );
       expect(scaffold.isDrawerOpen, isTrue);
       expect(fixture.root(fixture.primary), findsOneWidget);
@@ -307,15 +334,16 @@ void main() {
         );
         final saved = fixture.workspaces.workspaces.single;
         expect(saved.name, name);
-        expect(saved.memberPaths, [fixture.primary.path, fixture.secondary.path]);
+        expect(saved.memberPaths, [
+          fixture.primary.path,
+          fixture.secondary.path,
+        ]);
 
         // Save a session distinct from the legacy two-tab project history.
         final editor = fixture.editor(tester);
         editor.closeAt(0);
-        editor.current!.controller.selection = const CodeLineSelection.collapsed(
-          index: 0,
-          offset: 4,
-        );
+        editor.current!.controller.selection =
+            const CodeLineSelection.collapsed(index: 0, offset: 4);
         await tester.pump();
         await fixture.unmount(tester);
         final session = fixture.workspaces.byId(saved.id)!.session;
@@ -404,8 +432,14 @@ void main() {
         expect(secondarySource.readAsBytesSync(), secondaryBytes);
         await fixture.unmount(tester, workspaceStore: reopened);
         final history = await fixture.readHistory(tester);
-        expect(history.first.documents.single.relativePath, 'src/configured.rs');
-        expect(history.first.documents.single.projectPath, fixture.primary.path);
+        expect(
+          history.first.documents.single.relativePath,
+          'src/configured.rs',
+        );
+        expect(
+          history.first.documents.single.projectPath,
+          fixture.primary.path,
+        );
         expect(tester.takeException(), isNull);
       },
     );
@@ -611,7 +645,10 @@ path = "src/configured.rs"
     await tester.pump(const Duration(milliseconds: 250));
   }
 
-  Future<void> showExplorer(WidgetTester tester) async {
+  Future<void> showExplorer(
+    WidgetTester tester, {
+    String Function()? failureDetails,
+  }) async {
     final toggle = find.byTooltip('打开文件树');
     if (toggle.evaluate().isNotEmpty) await tester.tap(toggle);
     await tester.pump(const Duration(milliseconds: 250));
@@ -622,6 +659,7 @@ path = "src/configured.rs"
           root(secondary).evaluate().isNotEmpty &&
           entry(primary, 'src').hitTestable().evaluate().isNotEmpty &&
           entry(secondary, 'src').hitTestable().evaluate().isNotEmpty,
+      failureDetails: failureDetails,
     );
   }
 
@@ -695,7 +733,10 @@ path = "src/configured.rs"
     await readHistory(tester);
     var settled = false;
     Object? failure;
-    Future.wait([(workspaceStore ?? workspaces).settle(), store.refresh()]).then(
+    Future.wait([
+      (workspaceStore ?? workspaces).settle(),
+      store.refresh(),
+    ]).then(
       (_) => settled = true,
       onError: (Object error) {
         failure = error;
@@ -736,8 +777,9 @@ StudioProfile _withRecordingRunner(ProgramRunner runner) => StudioProfile(
 
 Future<void> _pumpIoUntil(
   WidgetTester tester,
-  bool Function() condition,
-) async {
+  bool Function() condition, {
+  String Function()? failureDetails,
+}) async {
   for (var attempt = 0; attempt < 200; attempt++) {
     await tester.pump(const Duration(milliseconds: 20));
     if (condition()) return;
@@ -745,9 +787,12 @@ Future<void> _pumpIoUntil(
       () => Future<void>.delayed(const Duration(milliseconds: 10)),
     );
   }
+  final details = failureDetails?.call();
   expect(
     condition(),
     isTrue,
-    reason: 'Rust workspace operation did not finish.',
+    reason: details == null
+        ? 'Rust workspace operation did not finish.'
+        : 'Rust workspace operation did not finish.\n$details',
   );
 }

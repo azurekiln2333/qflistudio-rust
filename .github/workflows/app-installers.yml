@@ -132,6 +132,16 @@ jobs:
       CORE_SDK_CONTRACT: flutter-oh-3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7724e60
       RUNTIME_RUN_ID: ${{ inputs.runtime_run_id }}
     steps:
+      - name: Enable Windows long paths for Git
+        if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          if [[ "$(git config --global --get core.longpaths)" != "true" ]]; then
+            echo '::error::Git core.longpaths is not enabled'
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: qflistudio-rust
