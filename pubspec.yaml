@@ -21,6 +21,8 @@ dependencies:
 dependency_overrides:
   re_editor:
     path: ../qflistudio-core/vendor/re_editor
+  xterm:
+    path: ../qflistudio-core/vendor/xterm
 
 dev_dependencies:
   integration_test:

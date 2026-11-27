@@ -58,13 +58,18 @@ the installer finalizer as a quality-workflow API.
   `RUNNER_TEMP`. Do not invoke helpers locally to exercise this guard.
 - Bind reports to `GITHUB_REPOSITORY`, `GITHUB_SHA`, `GITHUB_RUN_ID` and
   `GITHUB_RUN_ATTEMPT`. Checkout HEAD must equal the workflow SHA.
-- Workflow `CORE_REF` is a literal full SHA selected from live GitHub core
-  `main`, currently `476a30acee21dc486ee2849dd8064a7be665e4d5`. Before `init`,
+- Under the 2026-11-27 17:00 `core-last.md` ruling, hold workflow `CORE_REF`
+  at `476a30acee21dc486ee2849dd8064a7be665e4d5` while consumers finish migration.
+  Do not wait for final core publication or independently follow later `main`
+  changes. Before `init`,
   derive `APPROVED_CORE_SHA` and default `CORE_SHA` from that pin. An installer
   dispatch `core_sha` must match exactly: 40 lowercase hexadecimal characters.
-  Reject superseded `ee83f1c` and `573d1b6` prefixes. Update and republish through
-  the orchestra gate when core `main` advances; record a last-passing pin only
-  when an unreleased core change alone causes a documented quality failure.
+  Reject superseded `ee83f1c` and `573d1b6` prefixes. Use a last-passing core SHA
+  only for an evidenced failure caused solely by the selected core, and record
+  that exception in migration progress. After final core publication, the brain
+  starts one coordinated `CORE_REF` bump wave: one consumer commit, orchestra
+  gate and hosted CI. Record the current pin in `done.json` and list
+  `CORE_REF bump after the final core push` as pending, not a migration blocker.
 - Set `CORE_SDK_CONTRACT` to the exact reviewed recipe:
   `flutter-oh-3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7724e60`.
   Keep SDK identity verification. Setting the contract selects the recipe;
@@ -77,7 +82,31 @@ the installer finalizer as a quality-workflow API.
 - Check out sibling `qflistudio-core` from `azurekiln2333/qflistudio-core`.
   Keep Dart name `qfli_studio_core`. Pubspec, committed lockfile and resolved
   package configuration must agree on `../qflistudio-core` and its
-  `vendor/re_editor`. Reject a linked checkout or app `pubspec_overrides.yaml`.
+  `vendor/re_editor` and `vendor/xterm` packages. Reject a linked checkout or
+  app `pubspec_overrides.yaml`.
+
+The core owner confirmed that dependency overrides are not inherited from a
+dependency's pubspec. The consumer root `pubspec.yaml` must declare both vendor
+overrides explicitly, alongside its existing core path dependency:
+
+```yaml
+dependencies:
+  qfli_studio_core:
+    path: ../qflistudio-core
+dependency_overrides:
+  re_editor:
+    path: ../qflistudio-core/vendor/re_editor
+  xterm:
+    path: ../qflistudio-core/vendor/xterm
+```
+
+Preserve all other root dependencies. Committed lockfile descriptions and the
+hosted resolved package configuration must bind `re_editor` and `xterm` to those
+same sibling vendor paths. A hosted package from a registry is not an equivalent
+input. Bootstrap verification and post-restore provenance must reject a missing
+override, wrong path, missing vendor package or resolved-package path drift.
+This is the required contract; the current P3/P4 implementation and hosted
+regression evidence remain pending at this documentation handoff.
 
 Flutter source is the pinned `openharmony-tpc/flutter_flutter` tag
 `3.41.10-ohos-1.0.1` at the commit above. Verify tag, HEAD, Flutter/Dart version,
@@ -245,6 +274,7 @@ root-test execution pass is established.
 | --- | --- |
 | Non-hosted invocation | Reject before restore/build/check execution |
 | Missing or mismatched immutable migration pin/SDK identity, or stale paths | Fail preflight/bootstrap; quality reports blocked, not skipped success |
+| Root lacks either vendor override, or lock/resolved vendor path differs | Reject bootstrap or preparation; do not silently use registry packages |
 | Fork run, wrong source objects, expired runtime or bad checksum | Reject selection/install with source-bound diagnostics |
 | Producer hashes disagree, JNI-only corruption or extra payload | Reject before Flutter embedding |
 | OHOS typed properties malformed or build fails | Fail and restore both original config byte sequences |
@@ -259,12 +289,16 @@ root-test execution pass is established.
 - Good: workflows select the reviewed immutable migration inputs, a fresh hosted runner verifies the
   producer-to-package byte chain, checks the exact installer set and publishes
   bounded reports with honest signing/device limits.
+- Good: the consumer root overrides both `re_editor` and `xterm`, and committed
+  lock metadata plus hosted resolution point to the same pinned core vendors.
 - Base: required pinned inputs are absent. Independent helper contracts can run; core-bound
   application jobs fail with blocked evidence rather than becoming skipped passes.
 - Bad: check out mutable main without recording its SHA, claim production approval
   from the migration pin, trust a recent runtime by name, rehash fabricated
   producer records, supply string `"false"` to Hvigor, upload an inventory as
   intermediate bytes, or label two debug APKs complete Android release coverage.
+- Bad: assume core's own dependency overrides apply to the consumer, or override
+  `re_editor` while allowing `xterm` to resolve from the package registry.
 
 ## 6. Tests Required (assertion points)
 
@@ -282,6 +316,13 @@ Apple source/final hashes, Windows producer paths, guest coverage and JNI-only
 corruption. Cover typed Boolean no-sign configuration and byte-exact restoration
 on success/failure. Assert actual intermediate archive bytes, per-file hashes,
 safe links, limits and partial-output removal.
+
+Vendor-path regressions must accept both explicit root overrides and reject
+each missing override, each wrong vendor path, missing vendor pubspecs, wrong
+lock descriptions and registry or escaped resolved roots. Hosted resolution
+must retain the immutable core and both vendor identities through quality and
+installer preparation. P3/P4 own implementation and fixtures; this paragraph
+does not claim those regressions have run or passed.
 
 Package tests must reject missing/extra packages, wrong ABI, wrong OHOS ID,
 stale runtime bytes, dishonest signing/device flags and absent desktop install
@@ -312,6 +353,13 @@ Correct: require the immutable migration core pin and exact SDK identity, compar
 objects, verify producer and both copied-library byte chains, preserve OHOS ID,
 validate the exact package set and publish final-byte checksums. Report unsigned,
 armv7, device and unexecuted application gates separately.
+
+Wrong: depend on `qfli_studio_core` and rely on its pubspec to supply transitive
+vendor overrides, or advance core pins independently during consumer migration.
+
+Correct: declare both vendor overrides in the consumer root, bind lock and
+resolved paths, hold the coordinated core pin, and perform the later core bump
+only through the brain's commit/gate/hosted-CI wave.
 
 Migration completion requires actual hosted format, analysis and full root-test
 success at the published SHA. A helper pass cannot replace them. Record latest

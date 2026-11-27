@@ -9,12 +9,25 @@ This independent task is planning only. The user-approved coordinator ruling
 Do not start implementation, close the installer/native product tasks, or infer
 execution approval from migration `done.json`.
 
-The migration pins observed GitHub core `main` as immutable `CORE_REF`, currently
-`476a30acee21dc486ee2849dd8064a7be665e4d5`. The reviewed SDK recipe remains
+The later ruling `D:/MyNewProjects/_orchestra/decisions/core-last.md`, dated
+2026-11-27 17:00, requires consumers to finish before core. Hold immutable
+`CORE_REF` at `476a30acee21dc486ee2849dd8064a7be665e4d5` until the brain starts
+the coordinated bump wave after final core publication. Do not wait for that
+publication or automatically follow later core `main` changes. An evidenced
+failure caused solely by the selected core may use the last passing core SHA,
+with the exception recorded in progress. The reviewed SDK recipe remains
 Flutter-OH `3.41.10-ohos-1.0.1` at
 `adaf911c35c9136a7d18fc424d714c9ec7724e60`. Those input identities do not prove
 Rust native-hooks or production compatibility. Do not reuse the old `9d2eaf`
 tooling override or copy qflistudio-next patches speculatively.
+
+The core owner confirmed that consumer root dependency overrides are required
+because dependency pubspec overrides are not inherited. Root `pubspec.yaml`
+must include `re_editor: {path: ../qflistudio-core/vendor/re_editor}` and
+`xterm: {path: ../qflistudio-core/vendor/xterm}` under `dependency_overrides`.
+Committed lock metadata and hosted resolved package roots must match those
+paths. P3/P4 own the implementation and hosted regressions; this planning note
+does not claim they are complete or passing.
 
 ## Planned requirements
 
@@ -35,6 +48,10 @@ tooling override or copy qflistudio-next patches speculatively.
 - F6: Obtain receiver-hook command, stderr and execution evidence before
   diagnosing or claiming repair. The separate service-tier warning is not
   evidence of the hook's cause.
+- F7: `CORE_REF bump after the final core push` remains pending. Wait for the
+  brain's coordinated consumer bump wave, then make one reviewed consumer
+  commit, pass the orchestra gate and run hosted CI. Keep root core/vendor
+  dependencies and lock/resolution provenance coherent with the new pin.
 
 ## Evidence and acceptance
 
@@ -55,6 +72,8 @@ Actual hosted Dart formatting, Flutter analysis and the complete root test
 suite are still required by migration. They cannot be deferred here or replaced
 by helper/native success. Migration records the latest installer platform
 outcomes and lists missing coverage in `done.json`; that file completes only
-the workspace migration. Ignored source-only files are inventoried separately
+the workspace migration. Record the pinned core SHA in that file and list
+`CORE_REF bump after the final core push` in its notes as pending, not blocking.
+Ignored source-only files are inventoried separately
 from clean tracked HEAD/tree parity. No deletion or WSL unregistration is part
 of either this plan or the migration.

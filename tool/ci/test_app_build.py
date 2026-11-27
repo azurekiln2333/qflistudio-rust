@@ -50,6 +50,141 @@ class OrchestrationContracts(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "superseded"):
                 app.preflight(None, {"core": {}})
 
+    def core_dependency_fixture(self, temporary):
+        root = Path(temporary) / "consumer workspace" / "qflistudio-rust"
+        core = root.parent / "qflistudio-core"
+        root.mkdir(parents=True)
+        core.mkdir()
+        (core / "pubspec.yaml").write_text("name: qfli_studio_core\n", encoding="utf-8")
+        paths = {"qfli_studio_core": "../qflistudio-core",
+                 "re_editor": "../qflistudio-core/vendor/re_editor",
+                 "xterm": "../qflistudio-core/vendor/xterm"}
+        for name in ("re_editor", "xterm"):
+            vendor = core / "vendor" / name
+            vendor.mkdir(parents=True)
+            (vendor / "pubspec.yaml").write_text("name: " + name + "\n", encoding="utf-8")
+        pubspec = ("name: qfli_rust\ndependencies:\n  qfli_studio_core:\n    path: ../qflistudio-core\n"
+                   "dependency_overrides:\n  re_editor:\n    path: ../qflistudio-core/vendor/re_editor\n"
+                   "  xterm:\n    path: ../qflistudio-core/vendor/xterm\n")
+        (root / "pubspec.yaml").write_text(pubspec, encoding="utf-8")
+        versions = {"qfli_studio_core": "1.0.0+1", "re_editor": "0.10.0", "xterm": "4.0.0"}
+        blocks = {name: f'  {name}:\n    description:\n      path: "{relative}"\n      relative: true\n'
+                        f'    source: path\n    version: "{versions[name]}"\n'
+                  for name, relative in paths.items()}
+        lock = "packages:\n" + "".join(blocks.values())
+        (root / "pubspec.lock").write_text(lock, encoding="utf-8")
+        config = {"configVersion": 2, "packages": [
+            {"name": name, "rootUri": (root / relative).resolve().as_uri() + "/"}
+            for name, relative in paths.items()]}
+        support.write_json(root / ".dart_tool/package_config.json", config)
+        args = argparse.Namespace(output=root / "build/report", flutter_root=root / "flutter",
+                                  platform="linux", arch="x64")
+        (args.output / "reports").mkdir(parents=True)
+        return SimpleNamespace(root=root, core=core, paths=paths, pubspec=pubspec, lock=lock, blocks=blocks,
+                               config=config, manifest={"core": {"commit": "b" * 40, "compatibility": "not_verified"}},
+                               args=args)
+
+    def test_core_contract_accepts_both_root_vendor_overrides(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.core_dependency_fixture(temporary)
+            self.assertEqual(app.CORE_DEPENDENCY_PATHS, fixture.paths)
+            with patch.object(app, "ROOT", fixture.root), patch.object(app, "git_value", return_value="b" * 40):
+                app.verify_core(fixture.args, fixture.manifest)
+            self.assertIs(fixture.manifest["core"]["checkoutVerified"], True)
+
+    def test_core_contract_rejects_missing_wrong_or_misnamed_vendor_overrides(self):
+        for name in ("re_editor", "xterm"):
+            for mutation in ("missing", "wrong_path", "misnamed"):
+                with self.subTest(name=name, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                    fixture = self.core_dependency_fixture(temporary)
+                    block = f"  {name}:\n    path: {fixture.paths[name]}\n"
+                    replacement = {"missing": "", "wrong_path": block.replace("vendor/", "other/"),
+                                   "misnamed": block.replace(name + ":", "other:")}[mutation]
+                    (fixture.root / "pubspec.yaml").write_text(fixture.pubspec.replace(block, replacement), encoding="utf-8")
+                    with patch.object(app, "ROOT", fixture.root), patch.object(app, "git_value", return_value="b" * 40):
+                        with self.assertRaisesRegex(RuntimeError, "root dependency_overrides path for " + name):
+                            app.verify_core(fixture.args, fixture.manifest)
+
+    def test_core_contract_rejects_noncanonical_lock_sources(self):
+        for name in ("qfli_studio_core", "re_editor", "xterm"):
+            for mutation in ("missing", "hosted", "absolute", "wrong_path"):
+                with self.subTest(name=name, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                    fixture = self.core_dependency_fixture(temporary)
+                    block = fixture.blocks[name]
+                    replacement = {"missing": "", "hosted": block.replace("source: path", "source: hosted"),
+                                   "absolute": block.replace("relative: true", "relative: false"),
+                                   "wrong_path": block.replace(fixture.paths[name], "../other-core")}[mutation]
+                    (fixture.root / "pubspec.lock").write_text(fixture.lock.replace(block, replacement), encoding="utf-8")
+                    with patch.object(app, "ROOT", fixture.root), patch.object(app, "git_value", return_value="b" * 40):
+                        with self.assertRaisesRegex(RuntimeError, "lockfile path/source for " + name):
+                            app.verify_core(fixture.args, fixture.manifest)
+
+    def test_core_contract_rejects_absent_vendor_source(self):
+        for name in ("re_editor", "xterm"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                fixture = self.core_dependency_fixture(temporary)
+                (fixture.core / "vendor" / name / "pubspec.yaml").unlink()
+                with patch.object(app, "ROOT", fixture.root), patch.object(app, "git_value", return_value="b" * 40):
+                    with self.assertRaisesRegex(RuntimeError, "vendor/" + name + " is absent"):
+                        app.verify_core(fixture.args, fixture.manifest)
+
+    def test_release_accepts_vendor_roots_and_records_their_identities(self):
+        for uri_kind in ("file", "relative"):
+            with self.subTest(uri_kind=uri_kind), tempfile.TemporaryDirectory() as temporary:
+                fixture = self.core_dependency_fixture(temporary)
+                if uri_kind == "relative":
+                    for row in fixture.config["packages"]:
+                        row["rootUri"] = "../" + fixture.paths[row["name"]] + "/"
+                    support.write_json(fixture.root / ".dart_tool/package_config.json", fixture.config)
+                def identity(directory, *arguments):
+                    return app.FLUTTER_COMMIT if directory == fixture.args.flutter_root else "b" * 40
+                with patch.object(app, "ROOT", fixture.root), patch.object(app, "git_value", side_effect=identity), \
+                        patch.object(app, "run") as command, patch.object(app, "retain_intermediates"):
+                    app.build_release(fixture.args, fixture.manifest)
+                self.assertEqual(command.call_count, 2)
+                evidence = support.read_json(fixture.args.output / "reports/resolved-core.json")
+                self.assertEqual(evidence["packages"], {name: str((fixture.root / path).resolve())
+                                                       for name, path in fixture.paths.items()})
+                self.assertEqual(evidence["packageConfigSha256"], support.sha256(fixture.root / ".dart_tool/package_config.json"))
+                self.assertEqual(evidence["lockfileSha256"], support.sha256(fixture.root / "pubspec.lock"))
+
+    def test_release_rejects_missing_hosted_wrong_or_remote_xterm_roots_before_build(self):
+        for mutation in ("missing", "hosted", "wrong_root", "remote", "unsupported_scheme"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                fixture = self.core_dependency_fixture(temporary)
+                row = next(row for row in fixture.config["packages"] if row["name"] == "xterm")
+                if mutation == "missing":
+                    fixture.config["packages"].remove(row)
+                else:
+                    row["rootUri"] = {"hosted": (fixture.root / ".pub-cache/hosted/pub.dev/xterm-4.0.0").as_uri(),
+                                      "wrong_root": (fixture.core / "vendor/re_editor").as_uri(),
+                                      "remote": "file://remote.example/vendor/xterm",
+                                      "unsupported_scheme": "https://example.invalid/xterm"}[mutation]
+                support.write_json(fixture.root / ".dart_tool/package_config.json", fixture.config)
+                def identity(directory, *arguments):
+                    return app.FLUTTER_COMMIT if directory == fixture.args.flutter_root else "b" * 40
+                with patch.object(app, "ROOT", fixture.root), patch.object(app, "git_value", side_effect=identity), \
+                        patch.object(app, "run") as command:
+                    with self.assertRaisesRegex(RuntimeError, "(?:URI|path differs): xterm"):
+                        app.build_release(fixture.args, fixture.manifest)
+                command.assert_called_once()
+                self.assertEqual(fixture.manifest["core"]["compatibility"], "not_verified")
+
+    def test_release_rechecks_lock_source_after_restore(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.core_dependency_fixture(temporary)
+            def identity(directory, *arguments):
+                return app.FLUTTER_COMMIT if directory == fixture.args.flutter_root else "b" * 40
+            def restore(*arguments, **keywords):
+                block = fixture.blocks["xterm"]
+                (fixture.root / "pubspec.lock").write_text(
+                    fixture.lock.replace(block, block.replace("source: path", "source: hosted")), encoding="utf-8")
+            with patch.object(app, "ROOT", fixture.root), patch.object(app, "git_value", side_effect=identity), \
+                    patch.object(app, "run", side_effect=restore) as command:
+                with self.assertRaisesRegex(RuntimeError, "lockfile path/source for xterm"):
+                    app.build_release(fixture.args, fixture.manifest)
+            command.assert_called_once()
+
     def test_canonical_safe_paths(self):
         for value in ("../outside", "/absolute", "C:/drive", "a\\b", "a//b", "a/./b", "a\nb", ""):
             with self.subTest(value=value), self.assertRaises(RuntimeError):

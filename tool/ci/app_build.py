@@ -41,6 +41,11 @@ SDK_CONTRACT = "flutter-oh-3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7
 FLUTTER_REPOSITORY = "https://gitcode.com/openharmony-tpc/flutter_flutter.git"
 FLUTTER_TAG = "3.41.10-ohos-1.0.1"
 FLUTTER_COMMIT = "adaf911c35c9136a7d18fc424d714c9ec7724e60"
+CORE_DEPENDENCY_PATHS = {
+    "qfli_studio_core": "../qflistudio-core",
+    "re_editor": "../qflistudio-core/vendor/re_editor",
+    "xterm": "../qflistudio-core/vendor/xterm",
+}
 OHOS_SDK_RELEASE = "26.0.0.821"
 OHOS_SDK_SHA256 = "0cbdf7ac5c1be1e42694d448ffaee0c0be0ba9a948197e2bc5b61ca5bdc481f2"
 OHOS_PARTS = {
@@ -170,20 +175,24 @@ def verify_core(args, manifest):
     require(core.is_dir() and not core.is_symlink(), "Expected sibling checkout qflistudio-core")
     require(git_value(core, "rev-parse", "HEAD") == manifest["core"]["commit"], "Core checkout SHA differs")
     text = (ROOT / "pubspec.yaml").read_text(encoding="utf-8")
-    require(re.search(r"(?m)^  qfli_studio_core:\s*\n    path: ['\"]?\.\./qflistudio-core['\"]?\s*$", text),
-            "Coordinator must align qfli_studio_core dependency with ../qflistudio-core")
-    require(re.search(r"(?m)^    path: ['\"]?\.\./qflistudio-core/vendor/re_editor['\"]?\s*$", text),
-            "Coordinator must align re_editor vendor override with the same core checkout")
+    for name, expected in CORE_DEPENDENCY_PATHS.items():
+        section = "dependencies" if name == "qfli_studio_core" else "dependency_overrides"
+        block = re.search(r"(?ms)^" + section + r":[ \t]*\n(.*?)(?=^\S|\Z)", text)
+        require(block and re.search(r"(?m)^  " + name + r":[ \t]*\n    path: ['\"]?"
+                                    + re.escape(expected) + r"['\"]?[ \t]*$", block.group(1)),
+                "Coordinator must align root " + section + " path for " + name)
     require(re.search(r"(?m)^name:\s*qfli_studio_core\s*$",
                       (core / "pubspec.yaml").read_text(encoding="utf-8")), "Core Dart package identity changed")
-    require((core / "vendor/re_editor/pubspec.yaml").is_file(), "Core vendor/re_editor is absent")
+    for name in ("re_editor", "xterm"):
+        require((core / "vendor" / name / "pubspec.yaml").is_file(), "Core vendor/" + name + " is absent")
     require(not (ROOT / "pubspec_overrides.yaml").exists(), "Unreviewed app dependency override")
     lock = (ROOT / "pubspec.lock").read_text(encoding="utf-8")
-    for name, expected in (("qfli_studio_core", "../qflistudio-core"),
-                           ("re_editor", "../qflistudio-core/vendor/re_editor")):
-        block = re.search(r"(?ms)^  " + name + r":\n(.*?)(?=^  [a-zA-Z_]|\Z)", lock)
-        require(block and re.search(r"(?m)^      path: ['\"]?" + re.escape(expected) + r"['\"]?\s*$", block.group(1)),
-                "Coordinator must align committed lockfile path for " + name)
+    for name, expected in CORE_DEPENDENCY_PATHS.items():
+        block = re.search(r"(?ms)^  " + name + r":\n(.*?)(?=^  [a-zA-Z_]|^\S|\Z)", lock)
+        require(block and re.search(r"(?m)^      path: ['\"]?" + re.escape(expected) + r"['\"]?[ \t]*$", block.group(1))
+                and re.search(r"(?m)^      relative: true[ \t]*$", block.group(1))
+                and re.search(r"(?m)^    source: path[ \t]*$", block.group(1)),
+                "Coordinator must align committed lockfile path/source for " + name)
     manifest["core"]["checkoutVerified"] = True
     write_json(args.output / "reports/core-input.json", manifest["core"])
 
@@ -767,19 +776,26 @@ def build_release(args, manifest):
     reports = args.output / "reports"
     run([flutter(args), "pub", "get"], reports / "pub-get.log", env=env, timeout=1200)
     shutil.copy2(ROOT / "pubspec.lock", reports / "resolved-pubspec.lock")
-    config = read_json(ROOT / ".dart_tool/package_config.json")
+    verify_core(args, manifest)
+    config_path = ROOT / ".dart_tool/package_config.json"
+    config = read_json(config_path)
     packages = {row["name"]: row for row in config["packages"]}
-    for name, expected in (("qfli_studio_core", ROOT.parent / CORE_DIRECTORY),
-                           ("re_editor", ROOT.parent / CORE_DIRECTORY / "vendor/re_editor")):
+    resolved_paths = {}
+    for name, relative in CORE_DEPENDENCY_PATHS.items():
+        expected = (ROOT / relative).resolve()
         uri = urllib.parse.urlparse(packages.get(name, {}).get("rootUri", ""))
+        require(uri.path and uri.scheme in ("", "file") and not uri.netloc,
+                "Missing or unsupported resolved dependency URI: " + name)
         if uri.scheme == "file":
             resolved = Path(urllib.request.url2pathname(uri.path)).resolve()
         else:
-            require(not uri.scheme, "Unexpected dependency URI scheme")
-            resolved = (ROOT / ".dart_tool" / urllib.parse.unquote(uri.path)).resolve()
-        require(resolved == expected.resolve(), "Resolved dependency path differs: " + name)
+            resolved = (config_path.parent / urllib.parse.unquote(uri.path)).resolve()
+        require(resolved == expected, "Resolved dependency path differs: " + name)
+        resolved_paths[name] = str(resolved)
     write_json(reports / "resolved-core.json", {"coreCommit": manifest["core"]["commit"],
-                                               "packageName": "qfli_studio_core", "pathVerified": True})
+                                               "packageName": "qfli_studio_core", "pathVerified": True,
+                                               "packages": resolved_paths, "packageConfigSha256": sha256(config_path),
+                                               "lockfileSha256": sha256(ROOT / "pubspec.lock")})
     run(release_command(args, env), reports / "flutter-build.log", env=env, timeout=5400)
     manifest["core"]["compatibility"] = "this_platform_release_build_only"
     # Keep bounded evidence of available intermediates, never a compiler/cache tree.
