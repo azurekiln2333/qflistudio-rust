@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import secrets
 import subprocess
+import sys
 import tempfile
 from collections import deque
 
@@ -169,7 +170,7 @@ def annotation(level, message, *, heading=None, title=None):
 def annotate(level, message, *, heading=None, title=None):
     """Job logs need a login; annotations stay readable through the public checks API."""
     if os.environ.get("GITHUB_ACTIONS") == "true":
-        print(annotation(level, message, heading=heading, title=title), flush=True)
+        print_console(annotation(level, message, heading=heading, title=title))
 
 
 def annotate_command_failure(log, returncode, output):
@@ -187,15 +188,24 @@ def report_failure(output, stage, failure):
     return report
 
 
+def print_console(text):
+    """Keep diagnostics printable on legacy consoles; UTF-8 report files stay exact."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    printable = text.encode(encoding, errors="backslashreplace").decode(encoding)
+    print(printable, flush=True)
+
+
 def print_untrusted(text):
     """Print tool output without letting it issue workflow commands."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
-        print(text, flush=True)
+        print_console(text)
         return
     token = secrets.token_hex(16)
-    print(f"::stop-commands::{token}", flush=True)
-    print(text, flush=True)
-    print(f"::{token}::", flush=True)
+    print_console(f"::stop-commands::{token}")
+    try:
+        print_console(text)
+    finally:
+        print_console(f"::{token}::")
 
 
 def bounded_log(source):

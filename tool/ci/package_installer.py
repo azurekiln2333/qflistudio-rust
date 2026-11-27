@@ -307,7 +307,7 @@ def package_ios(root, stage, reports, arch):
     app_info(source, "ios")
     require(not (source / "embedded.mobileprovision").exists(),
             "Unsigned IPA unexpectedly includes a provisioning profile")
-    run(["xcrun", "lipo", "-verify_arch", "arm64", app_info(source, "ios")], reports / "ios-arch.log")
+    run(["xcrun", "lipo", app_info(source, "ios"), "-verify_arch", "arm64"], reports / "ios-arch.log")
     _, runtime = runtime_manifest(root, "ios", arch)
     for index, row in enumerate(runtime["nativeLibraries"]):
         relative = safe_relative(row["path"])
@@ -513,7 +513,7 @@ def package_windows(root, stage, reports, arch):
 
 def verify_macos(app, arch, reports, label):
     executable = app_info(app, "macos")
-    run(["xcrun", "lipo", "-verify_arch", "arm64" if arch == "arm64" else "x86_64", executable],
+    run(["xcrun", "lipo", executable, "-verify_arch", "arm64" if arch == "arm64" else "x86_64"],
         reports / f"macos-arch-{label}.log")
     run(["codesign", "--verify", "--deep", "--strict", app], reports / f"macos-signature-{label}.log")
     signature = run(["codesign", "--display", "--verbose=4", app], reports / f"macos-signing-{label}.log")

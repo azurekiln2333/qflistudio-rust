@@ -18,6 +18,9 @@ val rustPlatforms = (project.findProperty("target-platform") as? String)
 val rustAbis = rustPlatforms.map { target ->
     rustAbiMapping[target] ?: throw GradleException("Native Rust supports only android-arm64 and android-x64")
 }
+// Flutter's --split-per-abi configures Gradle ABI splits. Do not also set NDK
+// abiFilters for that invocation; target-platform and package checks constrain it.
+val splitPerAbi = providers.gradleProperty("split-per-abi").orNull == "true"
 
 android {
     namespace = "com.azurekiln.qfli.rustcore"
@@ -53,17 +56,21 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        ndk {
-            abiFilters.clear()
-            abiFilters += rustAbis
+        if (!splitPerAbi) {
+            ndk {
+                abiFilters.clear()
+                abiFilters += rustAbis
+            }
         }
     }
 
     buildTypes {
         configureEach {
-            ndk {
-                abiFilters.clear()
-                abiFilters += rustAbis
+            if (!splitPerAbi) {
+                ndk {
+                    abiFilters.clear()
+                    abiFilters += rustAbis
+                }
             }
         }
         release {

@@ -558,6 +558,7 @@ def machine_summary(path, root, expected):
     done = []
     failures = []
     errored = set()
+    started_processes = 0
     count = 0
     with path.open(encoding="utf-8") as stream:
         for line in stream:
@@ -566,6 +567,20 @@ def machine_summary(path, root, expected):
             if not line.strip():
                 continue
             event = json.loads(line)
+            if isinstance(event, list):
+                # Flutter EventPrinter interleaves this singleton notification
+                # with package:test's object events. It is not a test outcome.
+                require(len(event) == 1 and isinstance(event[0], dict),
+                        "Malformed Flutter test notification")
+                notification = event[0]
+                params = notification.get("params")
+                require(set(notification) == {"event", "params"}
+                        and notification["event"] == "test.startedProcess"
+                        and isinstance(params, dict) and set(params) == {"vmServiceUri"}
+                        and (params["vmServiceUri"] is None or isinstance(params["vmServiceUri"], str)),
+                        "Malformed or unsupported Flutter test notification")
+                started_processes += 1
+                continue
             require(isinstance(event, dict), "Malformed test protocol event")
             kind = event.get("type")
             if kind == "suite":
@@ -606,7 +621,8 @@ def machine_summary(path, root, expected):
                "skipped": skipped, "failed": failed, "unfinishedTestIds": unfinished, "protocolDone": done == [True],
                "skippedTestNames": [tests.get(key, str(key)) for key, row in visible.items() if row["skipped"]][:100],
                "errors": failures, "rawReportSha256": sha256(path), "rawReportBytes": path.stat().st_size,
-               "rawReportPublished": False, "nativeRuntimeExecuted": False, "deviceExecuted": False}
+               "rawReportPublished": False, "flutterStartedProcesses": started_processes,
+               "nativeRuntimeExecuted": False, "deviceExecuted": False}
     summary["success"] = summary["passed"] > 0 and not failed and not unfinished and not missing and done == [True]
     return summary
 

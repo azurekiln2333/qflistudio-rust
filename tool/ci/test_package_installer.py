@@ -256,6 +256,21 @@ class RuntimeArchiveTests(PackagingFixtures):
         self.assertEqual(result["qfli_miri.framework/qfli_miri"],
                          hashlib.sha256(b"adapterad-hoc-signature-change").hexdigest())
 
+    def test_ios_lipo_input_precedes_the_architecture_list_and_failure_stops_packaging(self):
+        source = self.root / "build/ios/iphoneos/Runner.app"
+        source.mkdir(parents=True)
+        executable = source / "Runner"
+        executable.write_bytes(b"fixture")
+        (source / "Info.plist").write_bytes(plistlib.dumps(
+            {"CFBundleIdentifier": APP_ID, "CFBundleExecutable": "Runner"}))
+        with mock.patch.object(packaging, "run", side_effect=RuntimeError("wrong architecture")) as command, \
+                mock.patch.object(packaging, "runtime_manifest") as runtime:
+            with self.assertRaisesRegex(RuntimeError, "wrong architecture"):
+                packaging.package_ios(self.root, self.root, self.output, "arm64")
+        command.assert_called_once_with(
+            ["xcrun", "lipo", executable, "-verify_arch", "arm64"], self.output / "ios-arch.log")
+        runtime.assert_not_called()
+
     def test_android_rejects_extra_abi_before_external_tools(self):
         apk = self.root / "bad.apk"
         apk.write_bytes(self.zip_bytes({"lib/arm64-v8a/libapp.so": b"arm64",
@@ -310,11 +325,19 @@ class DesktopContractTests(PackagingFixtures):
         (app / "Contents/MacOS/qfli_rust").write_bytes(b"fixture")
         (app / "Contents/Info.plist").write_bytes(plistlib.dumps(
             {"CFBundleIdentifier": APP_ID, "CFBundleExecutable": "qfli_rust"}))
-        with mock.patch.object(packaging, "run", side_effect=["", "", "Signature=adhoc\n"]) as command:
-            packaging.verify_macos(app, "arm64", self.output, "fixture")
-        calls = [call.args[0] for call in command.call_args_list]
-        self.assertEqual(calls[0][:4], ["xcrun", "lipo", "-verify_arch", "arm64"])
-        self.assertEqual(calls[1][:4], ["codesign", "--verify", "--deep", "--strict"])
+        executable = app / "Contents/MacOS/qfli_rust"
+        for arch, expected in (("arm64", "arm64"), ("x64", "x86_64")):
+            with self.subTest(arch=arch), \
+                    mock.patch.object(packaging, "run", side_effect=["", "", "Signature=adhoc\n"]) as command:
+                packaging.verify_macos(app, arch, self.output, "fixture")
+            calls = [call.args[0] for call in command.call_args_list]
+            self.assertEqual(calls[0], ["xcrun", "lipo", executable, "-verify_arch", expected])
+            self.assertEqual(calls[1][:4], ["codesign", "--verify", "--deep", "--strict"])
+        with mock.patch.object(packaging, "run", side_effect=RuntimeError("wrong architecture")) as command:
+            with self.assertRaisesRegex(RuntimeError, "wrong architecture"):
+                packaging.verify_macos(app, "arm64", self.output, "fixture")
+        command.assert_called_once_with(
+            ["xcrun", "lipo", executable, "-verify_arch", "arm64"], self.output / "macos-arch-fixture.log")
         with mock.patch.object(packaging, "run", side_effect=["", "", "Authority=Developer ID"]):
             with self.assertRaisesRegex(RuntimeError, "ad hoc"):
                 packaging.verify_macos(app, "x64", self.output, "fixture")

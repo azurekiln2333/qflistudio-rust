@@ -34,6 +34,25 @@ class OrchestrationContracts(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 support.resolve_target(parser.parse_args(["--platform", "android", "--arch", "all"]), parser)
 
+    def test_android_split_build_uses_only_supported_abis_without_duplicate_filters(self):
+        args = argparse.Namespace(platform="android", arch="arm64-x64", flutter_root=Path("flutter"))
+        command = app.release_command(args, {})
+        self.assertEqual(command[command.index("--target-platform") + 1], "android-arm64,android-x64")
+        self.assertEqual(command.count("--split-per-abi"), 1)
+        self.assertNotIn("android-arm,", command[command.index("--target-platform") + 1])
+
+        gradle = (app.ROOT / "android/app/build.gradle.kts").read_text(encoding="utf-8")
+        self.assertIn('mapOf("android-arm64" to "arm64-v8a", "android-x64" to "x86_64")', gradle)
+        self.assertIn('providers.gradleProperty("split-per-abi").orNull == "true"', gradle)
+        self.assertEqual(gradle.count("if (!splitPerAbi) {"), 2)
+        self.assertEqual(gradle.count("abiFilters.clear()"), 2)
+        self.assertEqual(gradle.count("abiFilters += rustAbis"), 2)
+
+    def test_linux_installer_runner_installs_secret_service_development_headers(self):
+        workflow = (app.ROOT / ".github/workflows/app-installers.yml").read_text(encoding="utf-8")
+        install = next(line for line in workflow.splitlines() if "apt-get install --no-install-recommends" in line)
+        self.assertIn("libsecret-1-dev", install)
+
     def test_process_execution_rejects_local_runner_before_writing(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(support.subprocess, "run") as command:
             with self.assertRaisesRegex(RuntimeError, "GitHub-hosted"):
@@ -377,6 +396,16 @@ class OrchestrationContracts(unittest.TestCase):
                 with patch.object(app, "ROOT", fixture.source), patch.object(Path, "resolve", side_effect=AssertionError("producer paths must stay lexical")):
                     data = app.verify_runtime_payload(fixture.root, fixture.key, fixture.selection)
                 self.assertEqual(data["schemaVersion"], 1 if platform == "ohos" else 2)
+
+    def test_android_runtime_payload_rejects_unselected_abi_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = self.runtime_fixture(root / "payload", root / "app", "android")
+            extra = fixture.root / "android/app/src/main/jniLibs/armeabi-v7a/libunexpected.so"
+            extra.parent.mkdir(parents=True)
+            extra.write_bytes(b"unselected ABI payload")
+            with patch.object(app, "ROOT", fixture.source), self.assertRaisesRegex(RuntimeError, "outside the verified selected payload"):
+                app.verify_runtime_payload(fixture.root, fixture.key, fixture.selection)
 
     def test_native_bytes_and_manifest_mutation_cannot_replace_producer_records(self):
         for platform in ("ohos", "android"):

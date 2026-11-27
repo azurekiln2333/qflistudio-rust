@@ -535,12 +535,16 @@ class QualityCommandTests(QualityFixtures):
 
         def fail(command, log, machine, **kwargs):
             self.write_machine_from_command(command, log, machine, **kwargs)
+            with machine.open("a", encoding="utf-8") as stream:
+                stream.write('[{"event":"test.startedProcess","params":{"vmServiceUri":null}}]\n')
             raise RuntimeError("test process failed")
 
         with mock.patch.object(quality, "run_machine", side_effect=fail):
             with self.assertRaisesRegex(RuntimeError, "test process failed"):
                 quality.execute_check(self.args, manifest, "test")
         self.assertEqual(manifest["checks"]["test"]["status"], "failed")
+        self.assertEqual(manifest["checks"]["test"]["summary"]["flutterStartedProcesses"], 1)
+        self.assertTrue((self.args.output / "reports/root-tests.json").is_file())
 
     def test_missing_test_protocol_fails(self):
         manifest = self.prepared()
@@ -614,6 +618,48 @@ class QualityProtocolAndFinalizationTests(QualityFixtures):
             with self.subTest(content=content):
                 self.assertFalse(self.summarize(content)["success"])
         self.assertTrue(self.summarize(self.protocol())["success"])
+
+    def test_flutter_started_process_notifications_preserve_real_test_evidence(self):
+        null_frame = '[{"event":"test.startedProcess","params":{"vmServiceUri":null}}]\n'
+        uri_frame = json.dumps([{"event": "test.startedProcess",
+                                 "params": {"vmServiceUri": "http://127.0.0.1:1234/private-service/"}}]) + "\n"
+        lines = self.protocol().splitlines(keepends=True)
+        result = self.summarize("\n" + null_frame + "".join(lines[:3]) + uri_frame + "".join(lines[3:]))
+        self.assertTrue(result["success"])
+        self.assertEqual(result["flutterStartedProcesses"], 2)
+        self.assertEqual(result["passed"], 2)
+        self.assertEqual(result["suiteFiles"], ["test/one_test.dart", "test/two_test.dart"])
+        self.assertNotIn("private-service", json.dumps(result))
+        failed = self.summarize(null_frame + self.protocol(failed=True))
+        self.assertFalse(failed["success"])
+        self.assertEqual(failed["failed"], 1)
+        self.assertEqual(failed["flutterStartedProcesses"], 1)
+        self.assertFalse(failed["protocolDone"])
+
+    def test_flutter_notifications_do_not_supply_test_or_completion_evidence(self):
+        frame = '[{"event":"test.startedProcess","params":{"vmServiceUri":null}}]\n'
+        for content in (frame, frame + '{"type":"done","success":true}\n',
+                        frame + self.protocol(omit_second=True), frame + self.protocol(done=False)):
+            with self.subTest(content=content):
+                self.assertFalse(self.summarize(content)["success"])
+        with mock.patch.object(quality, "MAX_TEST_EVENTS", 1):
+            with self.assertRaisesRegex(RuntimeError, "event bounds"):
+                self.summarize(frame + self.protocol())
+
+    def test_flutter_notification_envelopes_reject_malformed_or_hidden_results(self):
+        valid = {"event": "test.startedProcess", "params": {"vmServiceUri": None}}
+        for frame in ([], [valid, valid], [None], [[valid]],
+                      [{"type": "done", "success": True}],
+                      [dict(valid, event="test.unknown")],
+                      [dict(valid, type="done", success=True)],
+                      [{"event": "test.startedProcess"}],
+                      [dict(valid, params=None)], [dict(valid, params={})],
+                      [dict(valid, params={"vmServiceUri": 1})],
+                      [dict(valid, params={"vmServiceUri": False})],
+                      [dict(valid, params={"vmServiceUri": None, "success": True})]):
+            with self.subTest(frame=frame):
+                with self.assertRaisesRegex(RuntimeError, "Flutter test notification"):
+                    self.summarize(json.dumps(frame) + "\n" + self.protocol())
 
     def test_machine_summary_resolves_root_without_weakening_suite_confinement(self):
         path = self.scratch / "protocol.jsonl"
