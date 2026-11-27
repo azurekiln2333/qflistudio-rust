@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CORE_REF: 1ae4674a4b153701b0c3b3ff04b1a1b77a318611
+  CORE_REF: 8e031313ffc8d531c5a6b4d131f721f35da04c86
   PYTHONDONTWRITEBYTECODE: '1'
   PYTHONUNBUFFERED: '1'
 
