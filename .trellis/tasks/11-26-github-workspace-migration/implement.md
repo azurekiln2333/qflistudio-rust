@@ -14,9 +14,11 @@
 ## Current migration ruling — 2026-11-27 14:35
 
 Apply `D:/MyNewProjects/_orchestra/decisions/qflistudio-rust.md` under the user's
-approval. Pin live core `main` as immutable `CORE_REF`, currently
-`476a30acee21dc486ee2849dd8064a7be665e4d5`. The later 17:00 core-last ruling
-holds this pin until the brain starts the final-core consumer bump wave.
+approval. The 2026-11-28 01:36 `core-ref-wave.md` ruling supersedes the
+core-last hold and pins immutable `CORE_REF` to
+`1ae4674a4b153701b0c3b3ff04b1a1b77a318611`. Make one pin-only commit,
+pass the gate, renew target parity and acknowledgement, then record hosted CI.
+Do not adopt another core SHA without a new brain-authorized wave.
 The exact SDK recipe remains fixed. This does not assert final product or
 Rust native-hooks compatibility. Required hosted format, analysis and full root
 tests retain exact revision and genuine outcomes under the later 18:50 ruling.
@@ -53,7 +55,7 @@ inventory; they need not match the target. No deletion is authorized.
    GitHub SHA before continuing.
 5. Prepare CI helper, package and check workflows in disjoint worker ownership.
    Use the existing app-installer and native-runtime child tasks.
-6. Read live core GitHub `main` and pin its full SHA as `CORE_REF`. Align Rust
+6. Pin the brain-authorized core wave's full SHA as `CORE_REF`. Align Rust
    pubspec, lockfile paths, checkout layout and vendor override. Keep SDK identity
    checks. Final production compatibility is a follow-up. Do not run pub get locally.
 7. Complete native and application workflows. Include bounded intermediate
@@ -62,8 +64,8 @@ inventory; they need not match the target. No deletion is authorized.
 8. Use GitHub to run migration format, analysis and full root tests. One Pi
    observes logs and applies the 18:50 triage while target steps continue.
    Fix migration-caused source failures and republish through a new gate commit.
-   If a failure is solely an unreleased core change, record it and pin the last
-   passing core SHA. Record the latest installer run/outcome/artifacts/signing
+   Record core-caused failures; another core SHA requires a new brain wave.
+   Record the latest installer run/outcome/artifacts/signing
    for each platform; missing product acceptance remains a named follow-up.
    Do not download large build artifacts to either local workspace.
 9. Persist run evidence and accurate task progress. The coordinator reviews
@@ -189,7 +191,7 @@ dependency restoration, installer execution or artifact download is permitted.
 - No remote branch deletion until ancestry/preservation is proved.
 - No deletion based only on an ignore rule.
 - No unsigned package labelled device-ready.
-- Pin migration inputs to the observed immutable core `main`; do not claim final
+- Pin migration inputs to the brain-authorized immutable core SHA; do not claim final
   production compatibility from that selection.
 - No old workspace or shared VHD removal before preservation and ownership.
 - Keep original Git objects and untracked files until their audit is complete.

@@ -10,11 +10,12 @@ Hand over verified state to its Codex coordinator through Herdr.
 
 The coordinator ruling in
 `D:/MyNewProjects/_orchestra/decisions/qflistudio-rust.md` narrows completion to
-the workspace migration. Pin the observed GitHub core `main` as immutable
-`CORE_REF`; the current migration input is
-`476a30acee21dc486ee2849dd8064a7be665e4d5`. The later 17:00 `core-last.md`
-ruling holds this pin until consumers finish. Record `CORE_REF bump after the
-final core push` as a later coordinated follow-up. This is not product or SDK approval.
+the workspace migration. The 2026-11-28 01:36 `core-ref-wave.md` ruling
+supersedes the core-last hold and pins immutable `CORE_REF` to
+`1ae4674a4b153701b0c3b3ff04b1a1b77a318611`. Make one pin-only commit, pass
+the gate, renew target parity and acknowledgement, and record hosted CI.
+Do not adopt another core SHA without a new brain-authorized wave. This pin
+does not establish Rust product or SDK compatibility.
 
 Hosted Dart formatting, Flutter analysis and the full root test suite remain
 required evidence. The later 18:50 `ci-decoupled.md` ruling requires non-CI
@@ -135,7 +136,7 @@ publication and acquiring paid signing accounts remain outside this task.
 
 - Execution was approved on 2026-11-27 through Claude w61:p6. The task is
   `in_progress`; no further planning-review approval is pending.
-- Select immutable migration `CORE_REF` from live GitHub core `main`; do not
+- Select immutable migration `CORE_REF` from the brain-authorized wave; do not
   represent it as a final production compatibility approval.
 - Audit signing metadata; do not treat absent secrets as a completed installer.
 - Retain shared WSL ownership information without destructive operations.

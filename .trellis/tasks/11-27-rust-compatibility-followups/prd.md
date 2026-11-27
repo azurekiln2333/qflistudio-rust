@@ -9,13 +9,12 @@ This independent task is planning only. The user-approved coordinator ruling
 Do not start implementation, close the installer/native product tasks, or infer
 execution approval from migration `done.json`.
 
-The later ruling `D:/MyNewProjects/_orchestra/decisions/core-last.md`, dated
-2026-11-27 17:00, requires consumers to finish before core. Hold immutable
-`CORE_REF` at `476a30acee21dc486ee2849dd8064a7be665e4d5` until the brain starts
-the coordinated bump wave after final core publication. Do not wait for that
-publication or automatically follow later core `main` changes. An evidenced
-failure caused solely by the selected core may use the last passing core SHA,
-with the exception recorded in progress. The reviewed SDK recipe remains
+The 2026-11-28 01:36 ruling in
+`D:/MyNewProjects/_orchestra/decisions/core-ref-wave.md` supersedes the
+core-last hold. Pin immutable `CORE_REF` to
+`1ae4674a4b153701b0c3b3ff04b1a1b77a318611` for this authorized wave.
+Do not adopt another core SHA unless the brain sends another wave.
+The reviewed SDK recipe remains
 Flutter-OH `3.41.10-ohos-1.0.1` at
 `adaf911c35c9136a7d18fc424d714c9ec7724e60`. Those input identities do not prove
 Rust native-hooks or production compatibility. Do not reuse the old `9d2eaf`
@@ -48,9 +47,10 @@ does not claim they are complete or passing.
 - F6: Obtain receiver-hook command, stderr and execution evidence before
   diagnosing or claiming repair. The separate service-tier warning is not
   evidence of the hook's cause.
-- F7: `CORE_REF bump after the final core push` remains pending. Wait for the
-  brain's coordinated consumer bump wave, then make one reviewed consumer
-  commit, pass the orchestra gate and run hosted CI. Keep root core/vendor
+- F7: The brain authorized the core wave at
+  `1ae4674a4b153701b0c3b3ff04b1a1b77a318611`. Complete one pin-only consumer
+  commit, orchestra gate, target parity and acknowledgement, then hosted CI.
+  Record actual outcomes before closing the wave. Keep root core/vendor
   dependencies and lock/resolution provenance coherent with the new pin.
 
 ## Evidence and acceptance
@@ -76,8 +76,8 @@ repeated configuration failures, record proven pre-migration defects as
 follow-ups, and fix migration-caused failures through another gate commit.
 Migration records the latest installer platform
 outcomes and lists missing coverage in `done.json`; that file completes only
-the workspace migration. Record the pinned core SHA in that file and list
-`CORE_REF bump after the final core push` in its notes as pending, not blocking.
+the workspace migration. Record the exact core pin and the authorized wave's
+publication, target acknowledgement and hosted CI evidence in that file.
 Ignored source-only files are inventoried separately
 from clean tracked HEAD/tree parity. No deletion or WSL unregistration is part
 of either this plan or the migration.

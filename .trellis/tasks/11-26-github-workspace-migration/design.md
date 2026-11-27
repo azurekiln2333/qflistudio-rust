@@ -55,14 +55,17 @@ qflistudio-core. Update Rust-owned path dependencies and lockfile path entries
 together, with all generation/validation performed in cloud where applicable.
 Dart imports and package identity remain qfli_studio_core.
 
-The approved 2026-11-27 14:35 migration ruling uses an immutable `CORE_REF`
-from live GitHub core `main`, currently
-`476a30acee21dc486ee2849dd8064a7be665e4d5`. The later 17:00 core-last ruling
-holds this pin through consumer migration. A brain-coordinated bump wave after
-final core publication requires another commit, gate and hosted CI.
+The 2026-11-28 01:36 `core-ref-wave.md` ruling supersedes the core-last hold
+and pins immutable `CORE_REF` to `1ae4674a4b153701b0c3b3ff04b1a1b77a318611`.
+The wave requires one pin-only commit, gate, renewed target parity and
+acknowledgement, then hosted CI. Do not adopt another SHA without a new wave.
 Keep the exact reviewed Flutter-OH recipe.
 This selection establishes migration inputs, not final SDK/native-hooks or
 production compatibility. Do not reuse superseded ee83f1c or 573d1b6 pins.
+
+All current Rust jobs use the OHOS SDK and preserve the native Huawei view.
+Core's explicit `prepare_flutter_core.py --flavor official` contract applies
+to official Flutter jobs; this workflow set has none and applies no shim.
 
 Workflow `CORE_REF` feeds existing helper `CORE_SHA`/`APPROVED_CORE_SHA` values
 before initialization. A manual `core_sha` must still equal the pinned input.

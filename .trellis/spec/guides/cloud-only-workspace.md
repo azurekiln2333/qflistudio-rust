@@ -120,12 +120,13 @@ and SDK inputs, producer-byte verification, typed OHOS no-sign, bounded
 intermediates and quality-only report semantics.
 
 The coordinator's 2026-11-27 14:35 ruling limits `done.json` to workspace
-migration. Pin observed core `main` as immutable `CORE_REF`, retain the exact
+migration. Pin the brain-authorized core SHA as immutable `CORE_REF`, retain the exact
 reviewed SDK recipe, and retain actual hosted Dart formatting, Flutter
 analysis and complete root-suite evidence at the published migration SHA.
-The later 17:00 core-last ruling holds core
-`476a30acee21dc486ee2849dd8064a7be665e4d5` through consumer migration.
-Record `CORE_REF bump after the final core push` as a coordinated follow-up.
+The 2026-11-28 01:36 `core-ref-wave.md` ruling supersedes the core-last hold
+with core `1ae4674a4b153701b0c3b3ff04b1a1b77a318611`. This wave requires a
+pin-only commit, gate, target parity and acknowledgement, and hosted CI evidence.
+Do not adopt another core SHA unless the brain sends another wave.
 Missing final production core/SDK or Rust native-hooks approval does not block
 this migration pin. It remains unverified product compatibility.
 

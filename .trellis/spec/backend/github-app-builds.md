@@ -58,18 +58,19 @@ the installer finalizer as a quality-workflow API.
   `RUNNER_TEMP`. Do not invoke helpers locally to exercise this guard.
 - Bind reports to `GITHUB_REPOSITORY`, `GITHUB_SHA`, `GITHUB_RUN_ID` and
   `GITHUB_RUN_ATTEMPT`. Checkout HEAD must equal the workflow SHA.
-- Under the 2026-11-27 17:00 `core-last.md` ruling, hold workflow `CORE_REF`
-  at `476a30acee21dc486ee2849dd8064a7be665e4d5` while consumers finish migration.
-  Do not wait for final core publication or independently follow later `main`
+- The 2026-11-28 01:36 `core-ref-wave.md` ruling supersedes the core-last hold.
+  Pin workflow `CORE_REF` to `1ae4674a4b153701b0c3b3ff04b1a1b77a318611`.
+  Update only when the brain sends another wave; do not follow arbitrary `main`
   changes. Before `init`,
   derive `APPROVED_CORE_SHA` and default `CORE_SHA` from that pin. An installer
   dispatch `core_sha` must match exactly: 40 lowercase hexadecimal characters.
-  Reject superseded `ee83f1c` and `573d1b6` prefixes. Use a last-passing core SHA
-  only for an evidenced failure caused solely by the selected core, and record
-  that exception in migration progress. After final core publication, the brain
-  starts one coordinated `CORE_REF` bump wave: one consumer commit, orchestra
-  gate and hosted CI. Record the current pin in `done.json` and list
-  `CORE_REF bump after the final core push` as pending, not a migration blocker.
+  Reject superseded `ee83f1c` and `573d1b6` prefixes. This wave requires one
+  pin-only consumer commit, orchestra gate, target parity and acknowledgement,
+  then hosted CI with explicit failure triage. Record the exact pin and actual
+  wave evidence in `done.json`; source changes alone do not complete the wave.
+  All current Rust jobs use the OHOS SDK and retain the native Huawei view.
+  Core's `prepare_flutter_core.py --flavor official` is required for official
+  Flutter jobs; none is present in this workflow set, so no shim is applied.
 - Set `CORE_SDK_CONTRACT` to the exact reviewed recipe:
   `flutter-oh-3.41.10-ohos-1.0.1@adaf911c35c9136a7d18fc424d714c9ec7724e60`.
   Keep SDK identity verification. Setting the contract selects the recipe;

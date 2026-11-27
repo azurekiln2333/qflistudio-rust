@@ -36,8 +36,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Update this immutable migration input when qflistudio-core main advances.
-  CORE_REF: 476a30acee21dc486ee2849dd8064a7be665e4d5
+  # Update this immutable input only through a brain-authorized CORE_REF wave.
+  CORE_REF: 1ae4674a4b153701b0c3b3ff04b1a1b77a318611
   PYTHONDONTWRITEBYTECODE: '1'
   PYTHONUNBUFFERED: '1'
 
