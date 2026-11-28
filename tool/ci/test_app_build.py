@@ -8,6 +8,8 @@ import io
 import json
 import os
 from pathlib import Path
+import re
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -60,16 +62,96 @@ class OrchestrationContracts(unittest.TestCase):
         self.assertNotIn("--codesign", command)
         self.assertNotIn("--no-pub", command)
         self.assertEqual(env["PATH"], runner_path)
-        self.assertEqual(env["FLUTTER_XCODE_PATH"], os.pathsep.join(
-            part for part in (str(Path(sys.executable).resolve().parent), runner_path) if part))
+        self.assertEqual(env["FLUTTER_XCODE_QFLI_RUNTIME_PYTHON"], str(Path(sys.executable).resolve()))
+        self.assertTrue(Path(env["FLUTTER_XCODE_QFLI_RUNTIME_PYTHON"]).is_absolute())
+        self.assertNotIn("FLUTTER_XCODE_PATH", env)
 
-    def test_non_ios_release_builds_do_not_override_xcode_script_path(self):
-        for platform, arch in (("android", "arm64-x64"), ("ohos", "arm64"), ("macos", "arm64")):
-            with self.subTest(platform=platform):
+    def test_non_ios_release_builds_do_not_override_xcode_runtime_python(self):
+        for platform, arch in (("android", "arm64-x64"), ("ohos", "arm64"), ("macos", "arm64"),
+                               ("macos", "x64"), ("linux", "x64"), ("windows", "x64")):
+            with self.subTest(platform=platform, arch=arch):
                 env = {"PATH": os.environ.get("PATH", "")}
                 args = argparse.Namespace(platform=platform, arch=arch, flutter_root=Path("flutter"))
                 app.release_command(args, env)
+                self.assertNotIn("FLUTTER_XCODE_QFLI_RUNTIME_PYTHON", env)
                 self.assertNotIn("FLUTTER_XCODE_PATH", env)
+
+    @unittest.skipIf(os.name == "nt", "Xcode shell-phase regression runs on hosted POSIX runners")
+    def test_ios_committed_embed_phase_selects_explicit_python_and_fails_closed(self):
+        support.require_hosted_runner()
+        project_text = (app.ROOT / "ios/Runner.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+        phases = re.findall(r'A09F18B12DF0000000000001 /\* Embed Rust Runtime \*/ = \{(.*?)\n\t\t\};',
+                            project_text, re.DOTALL)
+        self.assertEqual(len(phases), 1)
+        encoded = re.findall(r'(?m)^\s*shellScript = ("(?:\\.|[^"\\])*");$', phases[0])
+        self.assertEqual(len(encoded), 1)
+        # This PBX string uses JSON-compatible quote/newline escaping. Execute
+        # that exact decoded phase, not a second copy of its shell logic.
+        script = json.loads(encoded[0])
+        self.assertNotIn("${", script)
+        self.assertNotIn("$(", script)
+        self.assertIn('"$PROJECT_DIR/../scripts/embed_miri_frameworks.py" ios', script)
+        self.assertNotIn("embed_miri_frameworks.sh", script)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            project = root / "project with spaces/ios"
+            project.mkdir(parents=True)
+            source = project.parent / "scripts/embed_miri_frameworks.py"
+            source.parent.mkdir()
+            source.write_text("# Fixture script passed to the fake interpreter.\n", encoding="utf-8")
+            interpreter = root / "runner python with spaces/runtime python"
+            interpreter.parent.mkdir()
+            shim = root / "path shims/python3"
+            shim.parent.mkdir()
+            record = root / "invocation.txt"
+            for executable, label in ((interpreter, "configured"), (shim, "fallback")):
+                executable.write_text("#!/bin/sh\nprintf '%s\\n' " + label
+                                      + ' "$@" > "$QFLI_TEST_ARGS"\nexit "$QFLI_TEST_EXIT"\n', encoding="utf-8")
+                executable.chmod(0o755)
+            nonexecutable = root / "not executable python"
+            nonexecutable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            nonexecutable.chmod(0o644)
+            env = {"PROJECT_DIR": str(project), "PATH": str(shim.parent),
+                   "QFLI_TEST_ARGS": str(record), "QFLI_TEST_EXIT": "0"}
+            expected_arguments = [str(project / "../scripts/embed_miri_frameworks.py"), "ios"]
+
+            def execute(values):
+                # Model Xcode's documented target-build-setting environment.
+                # Actual Flutter/Xcode propagation still needs the iOS job.
+                return subprocess.run(["/bin/sh", "-c", script], env=values, cwd=root,
+                                      capture_output=True, text=True, timeout=10)
+
+            configured = dict(env, QFLI_RUNTIME_PYTHON=str(interpreter))
+            result = execute(configured)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(record.read_text(encoding="utf-8").splitlines(),
+                             ["configured", *expected_arguments])
+            record.unlink()
+
+            invalid = ("", "python3", str(interpreter.relative_to(root)),
+                       str(root / "missing python"), str(nonexecutable), str(interpreter.parent))
+            for value in invalid:
+                with self.subTest(configured=value):
+                    result = execute(dict(env, QFLI_RUNTIME_PYTHON=value))
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("QFLI_RUNTIME_PYTHON must be an absolute executable file", result.stderr)
+                    self.assertFalse(record.exists(), "Invalid override invoked the PATH fallback")
+
+            for unrelated in (None, "unrelated\nQFLI_RUNTIME_PYTHON=/not/the/configured/key"):
+                with self.subTest(unrelated_multiline=unrelated is not None):
+                    values = dict(env)
+                    if unrelated is not None:
+                        values["QFLI_UNRELATED_VALUE"] = unrelated
+                    result = execute(values)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(record.read_text(encoding="utf-8").splitlines(),
+                                     ["fallback", *expected_arguments])
+                    record.unlink()
+            result = execute(dict(configured, QFLI_TEST_EXIT="23"))
+            self.assertEqual(result.returncode, 23)
+            self.assertEqual(record.read_text(encoding="utf-8").splitlines(),
+                             ["configured", *expected_arguments])
 
     def test_linux_installer_runner_installs_secret_service_development_headers(self):
         workflow = (app.ROOT / ".github/workflows/app-installers.yml").read_text(encoding="utf-8")

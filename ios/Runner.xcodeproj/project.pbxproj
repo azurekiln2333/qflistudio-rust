@@ -236,7 +236,7 @@
 			outputPaths = ();
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "/bin/sh \"$PROJECT_DIR/../scripts/embed_miri_frameworks.sh\" ios\n";
+			shellScript = "set -eu\nif /usr/bin/printenv QFLI_RUNTIME_PYTHON >/dev/null 2>&1; then\n  case \"$QFLI_RUNTIME_PYTHON\" in\n    /*) ;;\n    *) echo \"error: QFLI_RUNTIME_PYTHON must be an absolute executable file\" >&2; exit 2 ;;\n  esac\n  if [ ! -f \"$QFLI_RUNTIME_PYTHON\" ] || [ ! -x \"$QFLI_RUNTIME_PYTHON\" ]; then\n    echo \"error: QFLI_RUNTIME_PYTHON must be an absolute executable file\" >&2\n    exit 2\n  fi\n  exec \"$QFLI_RUNTIME_PYTHON\" \"$PROJECT_DIR/../scripts/embed_miri_frameworks.py\" ios\nfi\nexec python3 \"$PROJECT_DIR/../scripts/embed_miri_frameworks.py\" ios\n";
 		};
 		3B06AD1E1E4923F5004D2608 /* Thin Binary */ = {
 			isa = PBXShellScriptBuildPhase;
