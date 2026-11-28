@@ -161,6 +161,26 @@ redacts its bounded 2 MiB log and publishes only a bounded console tail.
 Generic Development Team advice after Xcode failure is not the underlying
 diagnosis. The added verbosity does not establish a signing fix.
 
+For iOS, `release_command(args, env)` sets `FLUTTER_XCODE_PATH` to the
+resolved parent of `sys.executable`, followed by the existing `env["PATH"]`
+using the host path separator. It leaves the ordinary `PATH` unchanged.
+The pinned Flutter source forwards `FLUTTER_XCODE_*` environment values as
+individual `xcodebuild` settings (`ios/xcodeproj.dart:347-365`,
+`ios/mac.dart:524,744-748` at `adaf911c35c9136a7d18fc424d714c9ec7724e60`).
+Thus Xcode receives `PATH=<runner Python bin>:<runner PATH>` and its Run Script
+phase can resolve the existing wrapper's bare `python3` to the hosted Python.
+Do not shell-quote this value: the SDK passes it as one argument in a list.
+
+This targets the observed iOS embed failure on missing `hashlib.file_digest`.
+The failed log records outer Python 3.13.15, but not the embed interpreter's
+path or version. An older system interpreter is an inference, not a measured
+version. Outer `actions/setup-python` alone did not bind the Xcode phase.
+Do not change native/scripts producer inputs to bypass their exact Git-object
+compatibility gate. Other platforms receive no new Xcode PATH setting.
+Missing hash APIs or embedding failures still fail the build; this environment
+contract does not waive hashing, unsigned-package limits or real hosted iOS
+acceptance. Helper source review alone cannot establish that acceptance.
+
 ### Runtime selection and producer-byte provenance
 
 `GH_TOKEN` is needed only for runtime metadata. Optional `RUNTIME_RUN_ID` or
@@ -468,6 +488,11 @@ Assert installer commands allow release plugin regeneration, preserve unsigned
 iOS verbosity, reject post-build lock or vendor-root drift before compatibility,
 and record the final package-config hash after harmless metadata changes.
 Check Windows long-path setup before checkout from the existing workspace.
+For iOS interpreter binding, assert the unchanged ordinary PATH, the resolved
+runner Python directory first in `FLUTTER_XCODE_PATH`, and unchanged unsigned,
+verbose and release-plugin flags. Assert no new PATH setting on other platform
+branches. Run the helpers and actual iOS embedding on GitHub-hosted runners;
+source review of the SDK pass-through is not execution evidence.
 These new regressions are authored but unexecuted until the next hosted run.
 The drawer timeout diagnostic retains the 200-attempt budget and all assertions;
 root/src/leaf match counts are diagnostic evidence, not a passing test.

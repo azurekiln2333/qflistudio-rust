@@ -48,6 +48,37 @@ inventory; they need not match the target. No deletion is authorized.
 
 ## Ordered execution
 
+### Takeover checkpoint — 2026-11-28
+
+`af4dc20f1489217283ba613424036f7fdd4d1415` passed the exact orchestration
+gate at 13:42:23 +08:00. The clean 875-row tracked parity receipt and recovered
+receiver ACK are in `research/parity-receipt-af4dc20-2026-11-28.md`.
+The receiver repeated target-only measurements at 21:04:12 +08:00 and checked
+GitHub-only URLs again at 21:16:24. Subsequent source repair edits mean that
+these dated observations are not a current source-clean assertion.
+
+Exact-SHA Cloud checks `46113314638` passed all four jobs. Application quality
+`46113314596` passed helper tests, analysis and the complete root protocol:
+334 passed, 20 skipped, zero failed across 22 suite files. Its remaining
+failure is two formatter wraps in `test/rust_workspace_integration_test.dart`
+plus derived finalization. Installer run `46113314581` passed six platform
+jobs; iOS embedding failed on missing `hashlib.file_digest` before packaging.
+No infrastructure rerun or historical failure waiver applies to these fixes.
+
+Current disjoint ownership supersedes the historical worker table below:
+p2 implements the exact two whitespace hunks and reviews p3; p3 owns only
+`tool/ci/app_build.py` and `tool/ci/test_app_build.py` for iOS interpreter
+binding; p4 is the sole CI watcher/evidence writer; p5 owns the dated parity
+receipt and reviews whitespace/evidence. The coordinator owns specs, final
+receipts, Git writes, gate requests and handover. Main remains Astra ultra;
+Pi remains Sol. No model fallback is authorized for this takeover.
+
+Independent source reviews accepted both fixes. The new revision still needs
+its own gate, target parity, receiver ACK and hosted quality results. Keep
+`scripts`, `native`, native-runtime workflow, core and SDK identities intact.
+Write `done.json` only after final-SHA evidence and truthful triage. Preserve
+both stashes, all baselines, ignored files and source-retirement holds.
+
 1. Capture a fresh source/target status and all remote advertised heads.
    Preserve concurrent edits and the original object store. Record ownership.
 2. Restore portable Trellis/agent source visibility and review candidate files

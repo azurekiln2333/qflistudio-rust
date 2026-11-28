@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
-- **Last Active**: 2026-11-17
+- **Total Sessions**: 7
+- **Last Active**: 2026-11-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~249 | Active |
+| `journal-1.md` | ~273 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-11-28 | Rust migration takeover and hosted CI repairs | `af4dc20`, `6eed554`, `86a89c6` | `main` |
 | 6 | 2026-11-17 | GPL alignment and mobile native CI validation | `1cebc79`, `341ffef`, `76dd57f`, `3a57b37`, `9fa6a09`, `76289a0` | `ci/native-runtime` |
 | 5 | 2026-10-26 | Rust compiler provenance and archive gate checkpoint | `aa8594a`, `b8a69a8` | `feat/rust-offline-ide-20261022` |
 | 4 | 2026-10-26 | Trilingual README and fresh Rust readiness checkpoint | `dd3343b`, `553e139` | `feat/rust-offline-ide-20261022` |

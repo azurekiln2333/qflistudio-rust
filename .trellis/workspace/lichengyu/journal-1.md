@@ -247,3 +247,28 @@ Aligned GPLv3 with qflistudio and pushed mobile native builds. Android compiler 
 ### Next Steps
 
 - Inspect iOS in run 43939926708, then jobs and runtime artifacts in corrected run 43946596992.
+
+
+## Session 7: Rust migration takeover and hosted CI repairs
+<!-- trellis-session: v=2 fp=c5e90d36baf1bc9e -->
+
+**Date**: 2026-11-28
+**Task**: Rust migration takeover and hosted CI repairs
+**Branch**: `main`
+
+### Summary
+
+Recovered exact af4dc20 gate/parity/receiver ACK and refreshed migration receipt. Cloud passed; analysis and full root protocol passed with 334 passed and 20 skipped; quality format and iOS interpreter failures required narrow repairs. Applied exact formatter wraps and iOS Xcode PATH binding with independent source review. New-revision hosted validation and renewed gate/parity/ACK remain pending. Preserve all baselines, both stashes, ignored state and source-retirement holds. No local executable checks or artifact downloads.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af4dc20` | fix(ci): verify quality assets and repair hosted fixtures |
+| `6eed554` | fix(test): apply hosted workspace formatter output |
+| `86a89c6` | fix(ci): bind iOS script phases to hosted Python |
+
+### Status
+
+**In progress** — repairs committed and source-reviewed. Final gate,
+tracked parity/ACK and hosted validation remain pending.
