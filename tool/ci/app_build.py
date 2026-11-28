@@ -750,6 +750,13 @@ def release_command(args, env):
         command += ["--no-codesign"]
         if args.platform == "ios":
             command += ["--verbose"]
+            # The pinned Flutter Xcode project forwards FLUTTER_XCODE_* values
+            # as xcodebuild settings. Bind Xcode script phases to this runner's
+            # Python before PATH can resolve an older system python3.
+            python_bin = str(Path(sys.executable).resolve().parent)
+            runner_path = env.get("PATH", "")
+            env["FLUTTER_XCODE_PATH"] = os.pathsep.join(
+                part for part in (python_bin, runner_path) if part)
         else:
             command += ["--target-platform", "ohos-arm64"]
     elif args.platform == "macos":

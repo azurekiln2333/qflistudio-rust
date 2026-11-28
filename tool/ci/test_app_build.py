@@ -48,15 +48,28 @@ class OrchestrationContracts(unittest.TestCase):
         self.assertEqual(gradle.count("abiFilters.clear()"), 2)
         self.assertEqual(gradle.count("abiFilters += rustAbis"), 2)
 
-    def test_ios_release_build_requests_verbose_unsigned_diagnostics(self):
+    def test_ios_release_build_requests_verbose_unsigned_diagnostics_and_runner_python(self):
         args = argparse.Namespace(platform="ios", arch="arm64", flutter_root=Path("flutter"))
-        command = list(map(str, app.release_command(args, {})))
+        runner_path = os.environ.get("PATH", "")
+        env = {"PATH": runner_path}
+        command = list(map(str, app.release_command(args, env)))
 
         self.assertEqual(command[1:3], ["build", "ios"])
         self.assertIn("--verbose", command)
         self.assertIn("--no-codesign", command)
         self.assertNotIn("--codesign", command)
         self.assertNotIn("--no-pub", command)
+        self.assertEqual(env["PATH"], runner_path)
+        self.assertEqual(env["FLUTTER_XCODE_PATH"], os.pathsep.join(
+            part for part in (str(Path(sys.executable).resolve().parent), runner_path) if part))
+
+    def test_non_ios_release_builds_do_not_override_xcode_script_path(self):
+        for platform, arch in (("android", "arm64-x64"), ("ohos", "arm64"), ("macos", "arm64")):
+            with self.subTest(platform=platform):
+                env = {"PATH": os.environ.get("PATH", "")}
+                args = argparse.Namespace(platform=platform, arch=arch, flutter_root=Path("flutter"))
+                app.release_command(args, env)
+                self.assertNotIn("FLUTTER_XCODE_PATH", env)
 
     def test_linux_installer_runner_installs_secret_service_development_headers(self):
         workflow = (app.ROOT / ".github/workflows/app-installers.yml").read_text(encoding="utf-8")
