@@ -122,6 +122,9 @@ class QualityFixtures(unittest.TestCase):
         if arguments == ("rev-parse", "HEAD"):
             return {self.root.resolve(): SOURCE_SHA, self.core.resolve(): CORE_SHA,
                     self.sdk.resolve(): quality.app.FLUTTER_COMMIT}[directory]
+        if len(arguments) == 2 and arguments[0] == "rev-parse" and arguments[1].startswith("HEAD:"):
+            self.assertIn(arguments[1][5:], quality.app.RUNTIME_INPUTS)
+            return "e" * 40
         if arguments == ("ls-files", "--stage", "-z"):
             return "\0".join(f"{self.index_modes.get(name, '100644')} "
                              f"{self.index_blobs.get(name, 'd' * 40)} 0\t{name}" for name in self.tracked)
@@ -142,8 +145,29 @@ class QualityFixtures(unittest.TestCase):
             return self.engine_files[arguments[1].split("/")[-1]]
         raise AssertionError(f"Unexpected Git fixture call: {directory}, {arguments}")
 
-    def prepared(self):
+    def quality_manifest(self):
+        """Explicit unit-test asset fixture, never producer or execution evidence."""
         manifest = quality.new_manifest(self.args)
+        root = self.root / "assets/miri"
+        root.mkdir(parents=True, exist_ok=True)
+        for name, data in (("manifest.ohos-arm64.json", b'{"fixture":"arm64"}'),
+                           ("manifest.ohos-x64.json", b'{"fixture":"x64"}'),
+                           ("manifest.json", b'{"fixture":"arm64"}')):
+            (root / name).write_bytes(data)
+        selection = {"runId": "200", "runAttempt": "1", "sourceCommit": "c" * 40,
+                     "qualitySource": copy.deepcopy(manifest["source"]),
+                     "inputCompatibility": {"method": "exact_git_objects", "objects": quality.quality_runtime_inputs(self.args)},
+                     "targets": list(quality.QUALITY_ASSET_TARGETS), "status": "verified_assets_only",
+                     "scope": "packaged_asset_bytes_only", "nativeRuntimeExecuted": False, "deviceExecuted": False,
+                     "artifacts": [{"id": index + 1, "name": "native-runtime-" + key}
+                                   for index, key in enumerate(quality.QUALITY_ASSET_TARGETS)],
+                     "files": quality.quality_asset_snapshot(self.root)}
+        manifest["nativeAssetInputs"] = selection
+        write_json(self.args.output / "reports/native-assets.json", selection)
+        return manifest
+
+    def prepared(self):
+        manifest = self.quality_manifest()
         with mock.patch.object(quality, "run", return_value="fixture version"):
             quality.prepare(self.args, manifest)
         return manifest
@@ -167,6 +191,272 @@ class QualityFixtures(unittest.TestCase):
         Path(log).parent.mkdir(parents=True, exist_ok=True)
         Path(log).write_text("fixture log", encoding="utf-8")
         return "fixture"
+
+
+class QualityAssetInputTests(QualityFixtures):
+    """Mocked producer seams test orchestration, never fabricate accepted inputs."""
+
+    def selected(self):
+        manifest = quality.new_manifest(self.args)
+        manifest["nativeAssetInputs"] = {
+            "runId": "200", "runAttempt": "1", "sourceCommit": "c" * 40,
+            "qualitySource": copy.deepcopy(manifest["source"]),
+            "inputCompatibility": {"method": "exact_git_objects",
+                                   "objects": quality.quality_runtime_inputs(self.args)},
+            "targets": list(quality.QUALITY_ASSET_TARGETS), "status": "selected_not_installed",
+            "scope": "packaged_asset_bytes_only", "nativeRuntimeExecuted": False,
+            "deviceExecuted": False,
+            "artifacts": [{"id": index + 1, "name": "native-runtime-" + key}
+                          for index, key in enumerate(quality.QUALITY_ASSET_TARGETS)]}
+        self.args.run_id = "200"
+        return manifest
+
+    def downloads(self):
+        self.args.source = self.scratch / "downloads"
+        self.args.source.mkdir()
+        (self.root / "assets/miri").mkdir(parents=True)
+        (self.root / "assets/miri/.gitkeep").write_bytes(b"")
+        for key in quality.QUALITY_ASSET_TARGETS:
+            archive = self.args.source / f"native-runtime-{key}.tar.gz"
+            archive.write_bytes(b"mock archive bytes, not a producer artifact")
+            archive.with_suffix(".gz.sha256").write_text(sha256(archive) + "  " + archive.name, encoding="ascii")
+
+    def extract_fixture(self, archive, destination):
+        key = archive.name.removeprefix("native-runtime-").removesuffix(".tar.gz")
+        assets = destination / "assets/miri"
+        assets.mkdir(parents=True)
+        data = {"id": "fixture-" + key, "rustVersion": "mock", "rustCommit": "mock"}
+        write_json(assets / f"manifest.{key}.json", data)
+        if key == "ohos-arm64":
+            write_json(assets / "manifest.json", data)
+        (assets / ("d" * 64 + ".bin")).write_bytes(b"mock shared guest asset")
+        library = destination / "ohos/entry/libs" / key / "never-load.so"
+        library.parent.mkdir(parents=True)
+        library.write_bytes(b"must stay private")
+        return data
+
+    def verify_fixture(self, extracted, key, selection):
+        self.assertEqual(selection["runId"], "200")
+        self.assertEqual(selection["sourceCommit"], "c" * 40)
+        self.assertEqual(selection["inputCompatibility"]["objects"], quality.quality_runtime_inputs(self.args))
+        self.assertFalse((self.root / "assets/miri/manifest.json").exists())
+        return read_json(extracted / "assets/miri" / f"manifest.{key}.json")
+
+    def install(self, manifest):
+        with mock.patch.object(quality.app, "extract_runtime", side_effect=self.extract_fixture), \
+                mock.patch.object(quality.app, "verify_runtime_payload", side_effect=self.verify_fixture) as verify:
+            quality.install_quality_assets(self.args, manifest)
+        self.assertEqual([call.args[1] for call in verify.call_args_list], list(quality.QUALITY_ASSET_TARGETS))
+
+    def test_selection_uses_both_targets_and_exact_input_object_validator(self):
+        manifest = self.selected()
+        selection = copy.deepcopy(manifest.pop("nativeAssetInputs"))
+        record = {"id": 200}
+        with mock.patch.object(quality.app, "api_json", return_value=record) as api, \
+                mock.patch.object(quality.app, "validate_runtime_run", return_value=selection) as validator, \
+                mock.patch.object(quality.app, "output_value") as outputs:
+            quality.resolve_quality_assets(self.args, manifest)
+        api.assert_called_once_with("/repos/owner/rust/actions/runs/200")
+        validator.assert_called_once_with(record, "owner/rust", quality.quality_runtime_inputs(self.args),
+                                          ("ohos-arm64", "ohos-x64"))
+        self.assertEqual(outputs.call_args_list, [mock.call("run_id", "200"), mock.call("artifact_ids", "1,2")])
+        self.assertEqual(manifest["nativeAssetInputs"]["status"], "selected_not_installed")
+        self.assertFalse(manifest["prepared"])
+
+    def test_actual_selection_validator_rejects_expired_missing_and_incompatible_inputs(self):
+        record = {"id": 200, "run_attempt": 1, "html_url": "https://example.invalid/run/200",
+                  "status": "completed", "conclusion": "success", "head_sha": "c" * 40,
+                  "repository": {"full_name": "owner/rust"}, "head_repository": {"full_name": "owner/rust"},
+                  "event": "push", "head_branch": "main", "path": quality.app.NATIVE_WORKFLOW}
+        expected = quality.quality_runtime_inputs(self.args)
+        artifacts = [{"id": index + 1, "name": "native-runtime-" + key, "size_in_bytes": 100,
+                      "expired": False, "expires_at": "2099-01-01T00:00:00Z"}
+                     for index, key in enumerate(quality.QUALITY_ASSET_TARGETS)]
+        for reason in ("expired", "missing", "incompatible"):
+            with self.subTest(reason=reason):
+                manifest = quality.new_manifest(self.args)
+                self.args.run_id = "200"
+                rows = copy.deepcopy(artifacts)
+                inputs = dict(expected)
+                if reason == "expired":
+                    rows[1]["expires_at"] = "2000-01-01T00:00:00Z"
+                elif reason == "missing":
+                    rows.pop()
+                else:
+                    inputs[quality.app.RUNTIME_INPUTS[0]] = "f" * 40
+                with mock.patch.object(quality.app, "api_json", return_value=record), \
+                        mock.patch.object(quality.app, "runtime_input_identity", return_value=inputs), \
+                        mock.patch.object(quality.app, "runtime_artifacts", return_value=rows), \
+                        mock.patch.object(quality.app, "output_value") as outputs:
+                    with self.assertRaises(RuntimeError):
+                        quality.resolve_quality_assets(self.args, manifest)
+                self.assertNotIn("nativeAssetInputs", manifest)
+                outputs.assert_not_called()
+
+    def test_automatic_selection_skips_rejected_runs_without_weakening_validation(self):
+        manifest = self.selected()
+        selection = manifest.pop("nativeAssetInputs")
+        self.args.run_id = None
+        with mock.patch.dict(os.environ, {"RUNTIME_RUN_ID": ""}), \
+                mock.patch.object(quality.app, "api_json", return_value={"workflow_runs": [{"id": 199}, {"id": 200}]}), \
+                mock.patch.object(quality.app, "validate_runtime_run",
+                                  side_effect=[RuntimeError("expired"), selection]) as validator, \
+                mock.patch.object(quality.app, "output_value"):
+            quality.resolve_quality_assets(self.args, manifest)
+        self.assertEqual(validator.call_count, 2)
+        self.assertEqual(manifest["nativeAssetInputs"]["runId"], "200")
+
+    def test_selection_rejects_another_quality_run_object_set_or_target(self):
+        original = self.selected()["nativeAssetInputs"]
+        bootstrap = quality.verify_bootstrap(self.args)
+        for mutation in ("source", "objects", "targets", "artifacts", "execution", "run"):
+            with self.subTest(mutation=mutation):
+                value = copy.deepcopy(original)
+                if mutation == "source":
+                    value["qualitySource"]["runAttempt"] = "9"
+                elif mutation == "objects":
+                    value["inputCompatibility"]["objects"]["scripts"] = "f" * 40
+                elif mutation == "targets":
+                    value["targets"].pop()
+                elif mutation == "artifacts":
+                    value["artifacts"][1]["id"] = value["artifacts"][0]["id"]
+                elif mutation == "execution":
+                    value["nativeRuntimeExecuted"] = True
+                else:
+                    value["sourceCommit"] = "main"
+                with self.assertRaises(RuntimeError):
+                    quality.validate_quality_asset_selection(self.args, value, bootstrap)
+
+    def test_both_full_payloads_are_verified_before_only_assets_reach_checkout(self):
+        manifest = self.selected()
+        self.downloads()
+        self.install(manifest)
+        quality.verify_quality_assets(self.args, manifest, quality.verify_bootstrap(self.args))
+        selection = manifest["nativeAssetInputs"]
+        self.assertEqual(selection["status"], "verified_assets_only")
+        self.assertEqual([row["target"] for row in selection["packages"]], list(quality.QUALITY_ASSET_TARGETS))
+        self.assertEqual(selection["totalBytes"], sum(row["size"] for row in selection["files"]))
+        self.assertEqual((self.root / "assets/miri/manifest.json").read_bytes(),
+                         (self.root / "assets/miri/manifest.ohos-arm64.json").read_bytes())
+        self.assertFalse((self.root / "ohos").exists())
+        self.assertEqual(list(self.root.rglob("*.so")), [])
+        self.assertEqual(list(self.args.output.rglob("*.bin")), [])
+        self.assertEqual(list(self.scratch.glob("qfli-quality-assets-*")), [])
+        self.assertFalse(selection["nativeRuntimeExecuted"])
+        self.assertFalse(selection["deviceExecuted"])
+
+    def test_second_payload_verification_failure_exposes_neither_architecture(self):
+        manifest = self.selected()
+        self.downloads()
+
+        def reject_second(extracted, key, selection):
+            data = self.verify_fixture(extracted, key, selection)
+            if key == "ohos-x64":
+                raise RuntimeError("producer byte chain differs")
+            return data
+
+        with mock.patch.object(quality.app, "extract_runtime", side_effect=self.extract_fixture), \
+                mock.patch.object(quality.app, "verify_runtime_payload", side_effect=reject_second):
+            with self.assertRaisesRegex(RuntimeError, "producer byte chain"):
+                quality.install_quality_assets(self.args, manifest)
+        self.assertEqual([path.name for path in (self.root / "assets/miri").iterdir()], [".gitkeep"])
+        self.assertEqual(manifest["nativeAssetInputs"]["status"], "installation_incomplete")
+        self.assertFalse((self.args.output / "reports/native-assets.json").exists())
+
+    def test_missing_archive_and_checksum_mismatch_stop_before_extraction(self):
+        manifest = self.selected()
+        self.downloads()
+        archive = self.args.source / "native-runtime-ohos-arm64.tar.gz"
+        archive.unlink()
+        with mock.patch.object(quality.app, "extract_runtime") as extract:
+            with self.assertRaisesRegex(RuntimeError, "Expected one"):
+                quality.install_quality_assets(self.args, manifest)
+            manifest["nativeAssetInputs"]["status"] = "selected_not_installed"
+            archive.write_bytes(b"changed bytes")
+            with self.assertRaisesRegex(RuntimeError, "checksum differs"):
+                quality.install_quality_assets(self.args, manifest)
+        extract.assert_not_called()
+
+    def test_downloads_outside_runner_temp_or_linked_are_rejected(self):
+        manifest = self.selected()
+        self.downloads()
+        original = self.args.source
+        self.args.source = self.root
+        with self.assertRaisesRegex(RuntimeError, "below RUNNER_TEMP"):
+            quality.install_quality_assets(self.args, manifest)
+        self.args.source = original
+        real_linked = quality.linked
+        with mock.patch.object(quality, "linked", side_effect=lambda path: path == original or real_linked(path)):
+            with self.assertRaisesRegex(RuntimeError, "below RUNNER_TEMP"):
+                quality.install_quality_assets(self.args, manifest)
+        self.assertEqual(manifest["nativeAssetInputs"]["status"], "selected_not_installed")
+
+    def test_asset_publication_failure_cannot_leave_verified_status(self):
+        manifest = self.selected()
+        self.downloads()
+        real_write = quality.write_json
+
+        def fail_report(path, value):
+            if Path(path).name == "native-assets.json":
+                raise OSError("report disk denied")
+            real_write(path, value)
+
+        with mock.patch.object(quality, "write_json", side_effect=fail_report), \
+                mock.patch.object(quality.app, "extract_runtime", side_effect=self.extract_fixture), \
+                mock.patch.object(quality.app, "verify_runtime_payload", side_effect=self.verify_fixture):
+            with self.assertRaisesRegex(OSError, "disk denied"):
+                quality.install_quality_assets(self.args, manifest)
+        self.assertEqual(manifest["nativeAssetInputs"]["status"], "installation_incomplete")
+        with mock.patch.object(quality, "run") as command:
+            with self.assertRaisesRegex(RuntimeError, "installation is incomplete"):
+                quality.prepare(self.args, manifest)
+        command.assert_not_called()
+
+    def test_missing_assets_block_prepare_before_pub_get(self):
+        manifest = quality.new_manifest(self.args)
+        with mock.patch.object(quality, "run") as command:
+            with self.assertRaisesRegex(RuntimeError, "another source or run"):
+                quality.prepare(self.args, manifest)
+        command.assert_not_called()
+        self.assertFalse(manifest["prepared"])
+
+    def test_asset_bytes_and_report_drift_block_checks_and_finalize(self):
+        manifest = self.prepared()
+        asset = self.root / "assets/miri/manifest.ohos-x64.json"
+        original = asset.read_bytes()
+        asset.write_bytes(b"changed")
+        with mock.patch.object(quality, "run") as command:
+            with self.assertRaisesRegex(RuntimeError, "assets changed"):
+                quality.execute_check(self.args, manifest, "analyze")
+        command.assert_not_called()
+        with self.assertRaisesRegex(RuntimeError, "assets changed"):
+            quality.finalize(self.args, manifest, "success")
+        self.assertEqual(manifest["status"], "failed")
+        asset.write_bytes(original)
+        write_json(self.args.output / "reports/native-assets.json", {})
+        with self.assertRaisesRegex(RuntimeError, "report changed"):
+            quality.verify_prepared(self.args, manifest)
+
+    def test_asset_changes_during_restore_leave_preparation_incomplete(self):
+        manifest = self.quality_manifest()
+
+        def mutate(*args, **kwargs):
+            (self.root / "assets/miri/manifest.json").write_bytes(b"changed during pub get")
+            return ""
+
+        with mock.patch.object(quality, "run", side_effect=mutate):
+            with self.assertRaisesRegex(RuntimeError, "assets changed"):
+                quality.prepare(self.args, manifest)
+        self.assertFalse(manifest["prepared"])
+
+    def test_asset_inventory_bounds_and_unknown_files_reject(self):
+        self.quality_manifest()
+        with mock.patch.object(quality.app, "MAX_RUNTIME_BYTES", 1):
+            with self.assertRaisesRegex(RuntimeError, "byte bound"):
+                quality.quality_asset_snapshot(self.root)
+        (self.root / "assets/miri/unreviewed.so").write_bytes(b"unexpected")
+        with self.assertRaisesRegex(RuntimeError, "Unexpected quality"):
+            quality.quality_asset_snapshot(self.root)
 
 
 class QualityIdentityTests(QualityFixtures):
@@ -242,7 +532,7 @@ class QualityIdentityTests(QualityFixtures):
         quality.verify_prepared(self.args, manifest)
 
     def test_restore_cannot_silently_rewrite_lockfile(self):
-        manifest = quality.new_manifest(self.args)
+        manifest = self.quality_manifest()
 
         def mutate(command, log, **kwargs):
             self.write("pubspec.lock", "packages: {}\n")
@@ -291,7 +581,7 @@ class QualityIdentityTests(QualityFixtures):
                          str(self.core / "vendor/xterm"))
 
     def test_prepare_rejects_hosted_xterm_before_quality_checks(self):
-        manifest = quality.new_manifest(self.args)
+        manifest = self.quality_manifest()
         config = self.root / ".dart_tool/package_config.json"
         value = read_json(config)
         next(row for row in value["packages"] if row["name"] == "xterm")["rootUri"] = "../../hosted/xterm-4.0.0"
@@ -314,7 +604,7 @@ class QualityIdentityTests(QualityFixtures):
 
 class QualityRestoreDiagnosticTests(QualityFixtures):
     def reject_restore(self, mutate, message="restore changed tracked"):
-        manifest = quality.new_manifest(self.args)
+        manifest = self.quality_manifest()
         with mock.patch.object(quality, "run", side_effect=mutate) as command, \
                 mock.patch.object(quality, "print_untrusted") as printed, \
                 mock.patch.object(quality, "annotate") as annotated:
@@ -456,7 +746,7 @@ class QualityRestoreDiagnosticTests(QualityFixtures):
             self.write("pubspec.lock", "packages: {}\n")
             return ""
 
-        manifest = quality.new_manifest(self.args)
+        manifest = self.quality_manifest()
         with mock.patch.object(Path, "write_text", fail_report), \
                 mock.patch.object(quality, "run", side_effect=mutate), \
                 mock.patch.object(quality, "print_untrusted", side_effect=OSError("console failed")), \
@@ -901,6 +1191,157 @@ class QualityMachineSummaryPublicationTests(QualityFixtures):
         path.write_text(content, encoding="utf-8")
         return quality.machine_summary(path, self.root, ["test/one_test.dart", "test/two_test.dart"])
 
+    def framework_protocol(self, prints, *, failed=True):
+        events = [json.loads(line) for line in self.protocol(failed=failed).splitlines()]
+        result = []
+        for event in events:
+            if event.get("type") == "testDone":
+                result.extend(prints.get(event["testID"], []))
+            result.append(event)
+        return "".join(json.dumps(event) + "\n" for event in result)
+
+    def test_split_framework_block_keeps_failed_context_only_and_stops_at_border(self):
+        def printed(identifier, text):
+            return {"type": "print", "testID": identifier, "message": text}
+
+        header = "══ " + quality.FRAMEWORK_EXCEPTION_HEADER + " ══"
+        content = self.framework_protocol({0: [
+            printed(0, "ordinary stdout before header"),
+            printed(999, header + " unknown ID body"),
+            printed(0, header), printed(0, "Expected one visible widget, found zero"),
+            printed(0, "════════════════"), printed(0, "ordinary stdout after border")],
+            1: [printed(1, header + "\nexpected exception in a passing test\n════════════════")]})
+        result = self.summarize(content)
+        self.assertFalse(result["success"])
+        self.assertEqual(len(result["frameworkExceptions"]), 1)
+        record = result["frameworkExceptions"][0]
+        self.assertEqual(record["testId"], "0")
+        self.assertIn("Expected one visible widget", record["text"])
+        for excluded in ("ordinary stdout", "unknown ID", "passing test"):
+            self.assertNotIn(excluded, json.dumps(result))
+        baseline = self.summarize(self.protocol(failed=True))
+        for key in ("passed", "failed", "completed", "skipped", "protocolDone", "success", "unfinishedTestIds"):
+            self.assertEqual(result[key], baseline[key])
+
+    def test_multiline_framework_block_has_same_body_and_stops_at_error_or_completion(self):
+        header = quality.FRAMEWORK_EXCEPTION_HEADER
+        for ending in ("error", "testDone"):
+            with self.subTest(ending=ending):
+                events = [{"type": "print", "testID": 0, "message": header + "\nUseful framework assertion"}]
+                if ending == "error":
+                    events += [{"type": "error", "testID": 0, "error": "See exception logs above"},
+                               {"type": "print", "testID": 0, "message": "unrelated after error"}]
+                result = self.summarize(self.framework_protocol({0: events}))
+                self.assertIn("Useful framework assertion", result["frameworkExceptions"][0]["text"])
+                self.assertNotIn("unrelated", json.dumps(result))
+                self.assertFalse(result["success"])
+
+    def test_framework_redaction_spans_print_events_before_truncation_and_omits_uris(self):
+        header = quality.FRAMEWORK_EXCEPTION_HEADER
+        messages = [header, "token=not-a-real-token", "-----BEGIN " + "PRIVATE KEY-----",
+                    "synthetic private material " * 20, "-----END " + "PRIVATE KEY-----",
+                    "vmServiceUri: http://127.0.0.1:1234/private-service",
+                    "link ws://127.0.0.1:4321/private-stream", "Useful final assertion", "════════════"]
+        prints = [{"type": "print", "testID": 0, "message": text} for text in messages]
+        with mock.patch.object(quality, "MAX_FRAMEWORK_EXCEPTION_RECORD_BYTES", 240):
+            result = self.summarize(self.framework_protocol({0: prints}))
+        text = result["frameworkExceptions"][0]["text"]
+        self.assertLessEqual(len(text.encode()), 240)
+        for value in ("not-a-real-token", "synthetic private", "127.0.0.1", "private-service", "private-stream"):
+            self.assertNotIn(value, text)
+        self.assertIn("redacted", text)
+        with mock.patch.object(quality, "print_untrusted"):
+            public = quality.publish_machine_summary(result)
+        self.assertNotIn("127.0.0.1", public)
+        self.assertFalse(result["success"])
+
+    def test_framework_capture_omits_overflowing_blocks_and_bounds_aggregate_text(self):
+        header = quality.FRAMEWORK_EXCEPTION_HEADER
+        messages = [header + "\n" + "x" * 20000 + "\n════════════", header + "\nsmall assertion\n════════════"]
+        prints = [{"type": "print", "testID": 0, "message": text} for text in messages]
+        result = self.summarize(self.framework_protocol({0: prints}))
+        self.assertEqual(len(result["frameworkExceptions"]), 1)
+        self.assertIn("small assertion", result["frameworkExceptions"][0]["text"])
+        messages = [header + "\n" + "bounded body " * 10 + "\n════════════"] * 20
+        prints = [{"type": "print", "testID": 0, "message": text} for text in messages]
+        with mock.patch.object(quality, "MAX_FRAMEWORK_EXCEPTION_BYTES", 500):
+            result = self.summarize(self.framework_protocol({0: prints}))
+        self.assertLessEqual(sum(len(row["text"].encode()) for row in result["frameworkExceptions"]), 500)
+        self.assertFalse(result["success"])
+
+    def test_interleaved_redaction_reserves_the_other_active_block_budget(self):
+        header = quality.FRAMEWORK_EXCEPTION_HEADER
+        first = header + "\n" + "\n".join(["token=x"] * 8)
+        second = header + "\nretained second assertion"
+        # Both blocks fit as raw text, but redacting the first expands it.
+        reserved = len(second.encode("utf-8")) + 1
+        limit = len(first.encode("utf-8")) + 1 + reserved + 8
+        self.assertGreater(len(quality.redact(first).encode("utf-8")), limit - reserved)
+        events = [json.loads(line) for line in self.protocol(failed=True).splitlines()]
+        starts = [event for event in events if event["type"] in ("suite", "testStart")]
+        events = starts + [
+            {"type": "print", "testID": 0, "message": first},
+            {"type": "print", "testID": 1, "message": second},
+            {"type": "error", "testID": 0, "error": "first failed"},
+            {"type": "testDone", "testID": 0, "result": "failure", "hidden": False},
+            {"type": "error", "testID": 1, "error": "second failed"},
+            {"type": "testDone", "testID": 1, "result": "failure", "hidden": False},
+            {"type": "done", "success": False}]
+        captured = []
+        original = quality.framework_exception_text
+
+        def observe(message, budget):
+            text = original(message, budget)
+            captured.append((message, budget, len(text.encode("utf-8"))))
+            return text
+
+        with mock.patch.object(quality, "MAX_FRAMEWORK_EXCEPTION_BYTES", limit), \
+                mock.patch.object(quality, "framework_exception_text", side_effect=observe):
+            result = self.summarize("".join(json.dumps(event) + "\n" for event in events))
+        self.assertEqual(len(captured), 2)
+        self.assertEqual(captured[0][0], first)
+        self.assertEqual(captured[0][1], limit - reserved)
+        self.assertLessEqual(captured[0][2] + reserved, limit)
+        self.assertEqual(result["frameworkExceptions"][1]["text"], second)
+        self.assertLessEqual(sum(row[2] for row in captured), limit)
+        self.assertEqual(result["failed"], 2)
+        self.assertFalse(result["success"])
+
+    def test_unterminated_framework_block_never_exposes_incomplete_private_key(self):
+        content = self.framework_protocol({0: [{"type": "print", "testID": 0,
+            "message": quality.FRAMEWORK_EXCEPTION_HEADER + "\n-----BEGIN " + "PRIVATE KEY-----\nsynthetic remainder"}]})
+        result = self.summarize(content)
+        self.assertNotIn("synthetic remainder", json.dumps(result))
+        self.assertIn("incomplete private key redacted", result["frameworkExceptions"][0]["text"])
+
+    def test_successful_tests_and_unmarked_stdout_never_gain_exception_evidence(self):
+        event = {"type": "print", "testID": 0,
+                 "message": quality.FRAMEWORK_EXCEPTION_HEADER + "\nexpected handled assertion"}
+        result = self.summarize(self.framework_protocol({0: [event]}, failed=False))
+        self.assertTrue(result["success"])
+        self.assertEqual(result["frameworkExceptions"], [])
+        event["message"] = "ordinary output even though test fails"
+        result = self.summarize(self.framework_protocol({0: [event]}))
+        self.assertFalse(result["success"])
+        self.assertEqual(result["frameworkExceptions"], [])
+
+    def test_public_framework_projection_revalidates_and_redacts_injected_fields(self):
+        summary = {"success": False, "failed": 1, "frameworkExceptions": [
+            {"testId": "not-numeric", "text": quality.FRAMEWORK_EXCEPTION_HEADER + " hidden invalid ID"},
+            {"testId": "1", "text": "arbitrary stdout"},
+            {"testId": "2", "text": quality.FRAMEWORK_EXCEPTION_HEADER
+             + "\npassword=not-a-real-password\nws://127.0.0.1/private\n" + "z" * 20000,
+             "rawProtocol": "do not copy"}]}
+        public = quality.machine_summary_public(summary)
+        text = json.dumps(public)
+        self.assertEqual(len(public["frameworkExceptions"]), 1)
+        self.assertEqual(public["frameworkExceptions"][0]["testId"], "2")
+        for value in ("not-a-real-password", "127.0.0.1", "rawProtocol", "arbitrary stdout", "invalid ID"):
+            self.assertNotIn(value, text)
+        self.assertLessEqual(len(public["frameworkExceptions"][0]["text"].encode()),
+                             quality.MAX_FRAMEWORK_EXCEPTION_RECORD_BYTES)
+        self.assertFalse(public["success"])
+
     def test_summary_prints_bounded_redacted_counts_after_the_evidence_write(self):
         manifest = self.prepared()
         published = []
@@ -1268,6 +1709,19 @@ class QualityProtocolAndFinalizationTests(QualityFixtures):
         caches = application.index("- name: Configure runner-local dependency caches")
         self.assertLess(application.index("uses: actions/setup-python@"), caches)
         self.assertLess(caches, application.index("python tool/ci/app_build.py init"))
+        self.assertIn("actions: read", application)
+        self.assertNotIn("actions: write", operational)
+        self.assertIn("QFLI_QUALITY_ASSET_SOURCE=$RUNNER_TEMP/qfli-quality-native-inputs", application)
+        stages = [application.index(value) for value in (
+            "python tool/ci/app_build.py setup-flutter", "python tool/ci/app_quality.py resolve-assets",
+            "uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+            "python tool/ci/app_quality.py install-assets", "python tool/ci/app_quality.py prepare",
+            "python tool/ci/app_quality.py test")]
+        self.assertEqual(stages, sorted(stages))
+        self.assertIn("artifact-ids: ${{ steps.quality_assets.outputs.artifact_ids }}", application)
+        self.assertIn("run-id: ${{ steps.quality_assets.outputs.run_id }}", application)
+        self.assertIn("github-token: ${{ github.token }}", application)
+        self.assertEqual(application.count("GH_TOKEN:"), 1)
         self.assertNotIn("needs:", operational)
         self.assertNotIn("if: ${{ vars.QFLI_APPROVED_CORE_SHA", operational)
 

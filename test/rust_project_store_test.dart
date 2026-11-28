@@ -396,7 +396,7 @@ void main() {
       final stdout = run!.stdout.toList();
       final stderr = run.stderr.toList();
       expect(await run.exitCode, 0, reason: (await stderr).join('\n'));
-      expect(await stdout, ['Hello, QFLIStudio+!']);
+      expect(await stdout, ['Hello, QFLIStudioN!']);
     },
     skip: !isCargoAvailable(),
   );

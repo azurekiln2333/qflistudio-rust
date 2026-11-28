@@ -131,23 +131,32 @@ void main() {
       await fixture.expand(tester, fixture.secondary, 'bin', 'inspect.rs');
 
       await tester.tap(find.byTooltip('收起文件树'));
+      // Build the changed width factor before advancing its animation.
+      await tester.pump();
       await tester.pump(const Duration(milliseconds: 250));
       expect(
         fixture.entry(fixture.primary, 'primary_helper.rs').hitTestable(),
         findsNothing,
+        reason: 'Sidebar close: the primary leaf must be hidden.',
       );
       expect(
         fixture.entry(fixture.secondary, 'inspect.rs').hitTestable(),
         findsNothing,
+        reason: 'Sidebar close: the secondary leaf must be hidden.',
       );
-      await fixture.showExplorer(tester);
+      await fixture.showExplorer(
+        tester,
+        failureDetails: () => 'Sidebar reopen: both root rows must be visible.',
+      );
       expect(
         fixture.entry(fixture.primary, 'primary_helper.rs').hitTestable(),
         findsOneWidget,
+        reason: 'Sidebar reopen: the primary nested leaf must remain visible.',
       );
       expect(
         fixture.entry(fixture.secondary, 'inspect.rs').hitTestable(),
         findsOneWidget,
+        reason: 'Sidebar reopen: the secondary nested leaf must remain visible.',
       );
 
       final saved = await fixture.readHistory(tester);
@@ -162,7 +171,10 @@ void main() {
       // state, rather than inheriting the previous widget's expansion set.
       await fixture.unmount(tester);
       await fixture.mount(tester);
-      await fixture.showExplorer(tester);
+      await fixture.showExplorer(
+        tester,
+        failureDetails: () => 'Reconstruction: both root rows must be visible.',
+      );
       await _pumpIoUntil(
         tester,
         () =>
@@ -176,6 +188,7 @@ void main() {
                 .hitTestable()
                 .evaluate()
                 .isNotEmpty,
+        failureDetails: () => 'Reconstruction: both nested leaves must restore.',
       );
       expect(fixture.root(fixture.primary), findsOneWidget);
       expect(fixture.root(fixture.secondary), findsOneWidget);

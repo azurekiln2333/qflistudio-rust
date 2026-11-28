@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qfli_rust/main.dart' as application;
 import 'package:qfli_studio_core/app.dart';
+import 'package:qfli_studio_core/layout/app_form_factor.dart';
 import 'package:qfli_studio_core/pages/home_page.dart';
 import 'package:qfli_studio_core/splash_screen.dart';
 
@@ -44,6 +45,21 @@ void main() {
     expect(binding.sendFramesToEngine, isFalse);
     await tester.pump();
     expect(find.byType(SplashScreen), findsOneWidget);
+    final original = tester.widget<QfliApp>(find.byType(QfliApp));
+    // Core reads the actual host OS for form factor, independently of the
+    // OHOS debug target. Keep the startup state and select its phone shell.
+    await tester.pumpWidget(
+      QfliApp(
+        key: original.key,
+        store: original.store,
+        auth: original.auth,
+        settings: original.settings,
+        ready: original.ready,
+        navigatorKey: original.navigatorKey,
+        githubController: original.githubController,
+        formFactor: AppFormFactor.phone,
+      ),
+    );
     await tester.pump(const Duration(milliseconds: 160));
     final app = tester.widget<QfliApp>(find.byType(QfliApp));
     for (var attempt = 0; attempt < 100 && !app.ready!.value; attempt++) {

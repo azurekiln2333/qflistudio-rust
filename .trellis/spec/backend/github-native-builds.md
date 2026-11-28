@@ -77,7 +77,8 @@ under `-GuestSysroot`. Linux uses local paths and native LLVM executables.
   selected manifest's asset files, ABI headers, and original build records.
 - Runtime packages and diagnostics expire after 14 days. Intermediate guest
   artifacts expire after one day. Never mark failure diagnostics as a runtime.
-- Push explicitly to GitHub: this project's origin has multiple push URLs.
+- Publish only through the orchestra push gate. Verify that the selected
+  source origin has GitHub-only fetch and push endpoints before submission.
 
 ## 4. Validation and error matrix
 

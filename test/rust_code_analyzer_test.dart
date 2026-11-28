@@ -152,14 +152,16 @@ void main() {
       test('native spanless $level is unavailable with exit zero', () async {
         final entry = write('src/main.rs', 'fn main() {}\n');
         final result = await RustCodeAnalyzer(
-          transport: _DiagnosticTransport((_) => [
-            {
-              r'$message_type': 'diagnostic',
-              'message': 'compiler input could not be loaded',
-              'level': level,
-              'spans': <Object>[],
-            },
-          ]),
+          transport: _DiagnosticTransport(
+            (_) => [
+              {
+                r'$message_type': 'diagnostic',
+                'message': 'compiler input could not be loaded',
+                'level': level,
+                'spans': <Object>[],
+              },
+            ],
+          ),
         ).analyze(_request(project: project.path, active: entry));
         expect(result.diagnostics, isEmpty);
         expect(result.unavailableReason, isNotNull);
@@ -172,27 +174,29 @@ void main() {
         () async {
           final entry = write('src/main.rs', 'fn main() {}\n');
           final result = await RustCodeAnalyzer(
-            transport: _DiagnosticTransport((job) => [
-              {
-                r'$message_type': 'diagnostic',
-                'message': 'source warning',
-                'level': 'warning',
-                'spans': [
-                  {
-                    'file_name': job.entryPath,
-                    'byte_start': 0,
-                    'byte_end': 2,
-                    'is_primary': true,
-                  },
-                ],
-              },
-              {
-                r'$message_type': 'diagnostic',
-                'message': 'compiler input record',
-                'level': includeError ? 'error' : 'note',
-                'spans': <Object>[],
-              },
-            ]),
+            transport: _DiagnosticTransport(
+              (job) => [
+                {
+                  r'$message_type': 'diagnostic',
+                  'message': 'source warning',
+                  'level': 'warning',
+                  'spans': [
+                    {
+                      'file_name': job.entryPath,
+                      'byte_start': 0,
+                      'byte_end': 2,
+                      'is_primary': true,
+                    },
+                  ],
+                },
+                {
+                  r'$message_type': 'diagnostic',
+                  'message': 'compiler input record',
+                  'level': includeError ? 'error' : 'note',
+                  'spans': <Object>[],
+                },
+              ],
+            ),
           ).analyze(_request(project: project.path, active: entry));
           if (includeError) {
             expect(result.unavailableReason, isNotNull);
@@ -211,27 +215,29 @@ void main() {
       test('mapped $level preserves the spanless abort summary', () async {
         final entry = write('src/main.rs', 'fn main() {}\n');
         final result = await RustCodeAnalyzer(
-          transport: _DiagnosticTransport((job) => [
-            {
-              r'$message_type': 'diagnostic',
-              'message': 'source error',
-              'level': level,
-              'spans': [
-                {
-                  'file_name': job.entryPath,
-                  'byte_start': 0,
-                  'byte_end': 2,
-                  'is_primary': true,
-                },
-              ],
-            },
-            {
-              r'$message_type': 'diagnostic',
-              'message': 'aborting due to 1 previous error',
-              'level': 'error',
-              'spans': <Object>[],
-            },
-          ]),
+          transport: _DiagnosticTransport(
+            (job) => [
+              {
+                r'$message_type': 'diagnostic',
+                'message': 'source error',
+                'level': level,
+                'spans': [
+                  {
+                    'file_name': job.entryPath,
+                    'byte_start': 0,
+                    'byte_end': 2,
+                    'is_primary': true,
+                  },
+                ],
+              },
+              {
+                r'$message_type': 'diagnostic',
+                'message': 'aborting due to 1 previous error',
+                'level': 'error',
+                'spans': <Object>[],
+              },
+            ],
+          ),
         ).analyze(_request(project: project.path, active: entry));
         expect(result.unavailableReason, isNull);
         expect(

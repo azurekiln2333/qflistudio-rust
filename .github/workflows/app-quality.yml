@@ -58,6 +58,9 @@ jobs:
     # this job with a blocked report, rather than turn it into a skipped pass.
     runs-on: ubuntu-24.04
     timeout-minutes: 70
+    permissions:
+      contents: read
+      actions: read
     defaults:
       run:
         shell: bash
@@ -80,7 +83,8 @@ jobs:
         run: |
           printf '%s\n' \
             "PUB_CACHE=$RUNNER_TEMP/qfli-quality-pub-cache" \
-            "GRADLE_USER_HOME=$RUNNER_TEMP/qfli-quality-gradle-cache" >> "$GITHUB_ENV"
+            "GRADLE_USER_HOME=$RUNNER_TEMP/qfli-quality-gradle-cache" \
+            "QFLI_QUALITY_ASSET_SOURCE=$RUNNER_TEMP/qfli-quality-native-inputs" >> "$GITHUB_ENV"
       - name: Bind migration core pin for quality stages
         # The env context is available at step scope, not job-env scope.
         env:
@@ -120,6 +124,25 @@ jobs:
           python tool/ci/app_build.py setup-flutter
           --platform linux --arch x64
           --output-dir build/app-artifacts/app-quality-linux-x64
+      - name: Select exact-input OHOS assets for packaged-manifest tests
+        id: quality_assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tool/ci/app_quality.py resolve-assets
+      - name: Download both selected OHOS archives into runner temporary storage
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          run-id: ${{ steps.quality_assets.outputs.run_id }}
+          github-token: ${{ github.token }}
+          artifact-ids: ${{ steps.quality_assets.outputs.artifact_ids }}
+          path: ${{ env.QFLI_QUALITY_ASSET_SOURCE }}
+          merge-multiple: true
+      - name: Verify full producer payloads and install asset bytes only
+        env:
+          QUALITY_ASSET_RUN_ID: ${{ steps.quality_assets.outputs.run_id }}
+        run: >-
+          python tool/ci/app_quality.py install-assets
+          --source "$QFLI_QUALITY_ASSET_SOURCE" --run-id "$QUALITY_ASSET_RUN_ID"
       - name: Restore dependencies and bind quality input provenance
         run: python tool/ci/app_quality.py prepare
       - name: Verify Dart formatting without rewriting source

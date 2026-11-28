@@ -36,7 +36,8 @@ python tool/ci/app_build.py <stage> [--platform <platform>] [--arch <arch>] [--o
 python tool/ci/app_build.py install-runtime --source <RUNNER_TEMP/native-runtime> --run-id <positive-id>
 python tool/ci/app_build.py finalize --job-status <success|failure|cancelled>
 python tool/ci/package_installer.py --platform <platform> --arch <arch>
-python tool/ci/app_quality.py <prepare|format|analyze|test|finalize> [--output-dir <quality-dir>] [--bootstrap-dir <bootstrap-dir>] [--job-status <status>]
+python tool/ci/app_quality.py <resolve-assets|install-assets|prepare|format|analyze|test|finalize> [--output-dir <quality-dir>] [--bootstrap-dir <bootstrap-dir>] [--job-status <status>]
+python tool/ci/app_quality.py install-assets --source <RUNNER_TEMP/quality-assets> --run-id <positive-id>
 ```
 
 `QFLI_PLATFORM`/`QFLI_ARCH` supply target defaults. Installer bootstrap stages
@@ -47,8 +48,9 @@ stage, including the package stage, rather than trusting job status alone.
 
 Quality bootstrap uses `app_build.py` stages `init`, `preflight`, `verify-core`,
 `setup-flutter` with output `build/app-artifacts/app-quality-linux-x64`.
-Then use `app_quality.py prepare`, each check and its own `finalize`. Never use
-the installer finalizer as a quality-workflow API.
+Then use `app_quality.py resolve-assets`, download the selected archives into
+runner temporary storage, and run `install-assets`, `prepare`, each check and
+its own `finalize`. Never use the installer finalizer as a quality-workflow API.
 
 ## 3. Contracts (environment, schemas and bytes)
 
@@ -285,6 +287,33 @@ clean tracked app/core source, resolved dependency paths, SDK executable/engine
 and tooling-lock hashes. Dependency restoration must not change tracked inputs.
 Remove read tokens from check subprocess environments.
 
+Full root tests include real packaged OHOS manifest and asset assertions.
+Before restoring Dart dependencies, select both `native-runtime-ohos-arm64`
+and `native-runtime-ohos-x64` from one successful same-repository main run.
+Reuse the installer resolver's exact native/scripts/workflow Git-object
+comparison and artifact expiry/size checks. Keep Linux/x64 bootstrap identity;
+asset inputs do not change the quality execution platform.
+
+`resolve-assets` emits `run_id` and `artifact_ids`. Supply `GH_TOKEN` only to
+that step and the ephemeral `github.token` only to the artifact download
+action. Grant `actions: read`; retain ordinary pull requests, read-only
+permissions, no secrets and no persisted checkout credentials. Store downloads
+below `RUNNER_TEMP` via `QFLI_QUALITY_ASSET_SOURCE`. Check each archive's
+sidecar SHA-256, safe extraction and complete producer-to-payload binding with
+the existing runtime verifier. Verify both architectures before copying only
+`assets/miri` into the disposable checkout. Do not install or execute native
+libraries, fabricate manifests, or filter the packaged-manifest tests.
+
+Record `nativeAssetInputs` with source/run identities, producer compatibility,
+both package identities and an exact size/hash inventory. Require both
+architecture manifests, their distinct IDs and the ARM64 legacy alias. Reject
+linked, unexpected, missing or altered files. Recheck the inventory before and
+after dependency restoration and every quality check. Missing, expired or
+incompatible inputs block preparation. The asset copy remains bounded by the
+runtime member count and 4 GiB total; publish only the bounded provenance
+reports, never the assets or downloaded archives. Scope is
+`packaged_asset_bytes_only`, with native/device execution flags false.
+
 Commands are non-mutating Dart format over `lib test integration_test`,
 `flutter analyze --no-pub`, and exactly `flutter test --no-pub --machine test`.
 The dedicated `run_machine` captures full machine-protocol stdout privately in
@@ -332,6 +361,21 @@ public summary text to 64 KiB; omit raw protocol, raw hash, test-name fields
 and VM service fields. Public success must derive from the strict summary.
 Printing failure must not change the recorded test result or finalization gate.
 
+Flutter widget failures can place the actual assertion in framework `print`
+events while the `error` event only refers to those logs. Retain diagnostic
+blocks per test ID starting at the explicit Flutter test-framework exception
+header, ending at the closing separator, error, test completion or stream end.
+Handle both multiline and split events. Publish blocks only for failed IDs;
+ordinary stdout and successful-test blocks are omitted. Bound retained text
+to 16 KiB combined across active raw blocks and stored sanitized blocks, and
+each published record to 4,000 bytes. Reserve other active blocks when a
+completed block expands during redaction. Omit a whole block
+when capture overflows, redact the complete retained block before truncation,
+and sanitize it again when selecting public summary fields. Exception text may
+contain the test description and assertion context; raw event fields and VM
+service addresses remain excluded. Diagnostic text never supplies protocol
+completion, suite coverage or a successful test result.
+
 Finalization independently verifies all checks and rechecks the persisted root
 test summary against manifest evidence, complete suite coverage and skip status.
 Report `blocked` when approval or preparation never completed, `failed` after
@@ -368,10 +412,12 @@ root-test execution pass is established.
 | Missing package, wrong ABI/ID/runtime bytes or absent install evidence | No successful installer publication |
 | Intermediate bound/link/hash violation | Remove partial intermediate output and fail |
 | Missing root suite, incomplete protocol, all-skipped or changed inputs | Quality cannot pass |
+| Either OHOS asset input missing, incompatible or changed | Block preparation or fail the affected check; retain packaged tests |
 | Valid Flutter started-process notification | Count metadata only; retain every test/process gate |
 | Malformed or unsupported array notification | Reject protocol evidence |
 | Formatter preview timeout, read error or unsafe path | Omit preview; retain original strict format failure |
 | Diagnostic publication fails | Preserve required check status and exception |
+| Framework exception block overflows or belongs to a passing test | Omit that diagnostic without changing test outcomes |
 | Legacy console cannot encode a diagnostic character | Escape console representation; retain redacted UTF-8 report and subprocess status |
 | Package/checksum/report publication failure | Revoke candidate success; report-file completion does not prove artifact upload; hosted regressions pending |
 | Native-only/helper-only success | Application, signing, armv7 and device acceptance remain pending |
@@ -440,6 +486,18 @@ fails. Assert preparation drift skips previews and other check stages do not
 invoke them. Derived root-summary tests must preserve failing protocols, omit
 raw fields and tolerate printing errors. These additions remain UNRUN until a
 new committed hosted helper run executes them.
+
+Quality asset regressions must reject an absent architecture, incompatible or
+expired producer, corrupt sidecar/payload, mismatched manifest identities,
+links, unexpected files and post-install mutation. Verify both full payloads
+before copying assets only; never copy platform libraries into the checkout.
+Assert immutable download IDs, resolver-only token scope and stage ordering.
+Framework diagnostic regressions must cover split/multiline exceptions,
+redaction before truncation, passing-test omission, overflow and interleaved
+blocks whose redaction expands while another block remains active. Combined
+active/stored text must remain within 16 KiB without changing protocol results.
+These new asset/exception regressions are UNRUN until the published revision's
+hosted helper jobs execute them.
 
 Vendor-path regressions must accept both explicit root overrides and reject
 each missing override, each wrong vendor path, missing vendor pubspecs, wrong

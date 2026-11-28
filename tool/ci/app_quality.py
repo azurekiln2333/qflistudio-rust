@@ -68,6 +68,10 @@ MAX_FORMAT_DIAGNOSTIC_BYTES = 48 * 1024
 FORMAT_DIAGNOSTIC_TIMEOUT = 120
 MAX_MACHINE_SUMMARY_ERRORS = 30
 MAX_MACHINE_SUMMARY_BYTES = 64 * 1024
+MAX_FRAMEWORK_EXCEPTION_BYTES = 16 * 1024
+MAX_FRAMEWORK_EXCEPTION_RECORD_BYTES = 4000
+FRAMEWORK_EXCEPTION_HEADER = "EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK"
+QUALITY_ASSET_TARGETS = ("ohos-arm64", "ohos-x64")
 
 
 def require(condition, message):
@@ -525,6 +529,34 @@ def write_format_failure_diagnostic(args, command, failure):
     return report
 
 
+def framework_exception_text(message, limit):
+    # Scrub complete blocks before slicing: secret markers can span print events.
+    text = redact(message)
+    text = re.sub(r"(?s)-----BEGIN [^-]*PRIVATE KEY-----.*\Z", "[incomplete private key redacted]", text)
+    text = re.sub(r"(?im)^.*(?:vmserviceuri|vm service|observatory).*$", "[service detail omitted]", text)
+    text = re.sub(r"\b(?:https?|wss?)://[^\s<>\"']+", "[URI omitted]", text, flags=re.IGNORECASE)
+    return bounded_diagnostic(text, limit)
+
+
+def public_framework_exceptions(records):
+    """Revalidate the derived field instead of trusting arbitrary summary data."""
+    result = []
+    remaining = MAX_FRAMEWORK_EXCEPTION_BYTES
+    if not isinstance(records, list):
+        return result
+    for record in records[:MAX_MACHINE_SUMMARY_ERRORS]:
+        if not isinstance(record, dict) or remaining <= 0:
+            continue
+        identifier, text = str(record.get("testId", "")), record.get("text")
+        if not re.fullmatch(r"[0-9]+", identifier) or not isinstance(text, str) \
+                or FRAMEWORK_EXCEPTION_HEADER not in text:
+            continue
+        text = framework_exception_text(text, min(remaining, MAX_FRAMEWORK_EXCEPTION_RECORD_BYTES))
+        result.append({"testId": identifier, "text": text})
+        remaining -= len(text.encode("utf-8"))
+    return result
+
+
 def machine_summary_public(summary):
     """Select the bounded, redacted fields that may leave the runner."""
     def names(values):
@@ -540,6 +572,7 @@ def machine_summary_public(summary):
             "unfinishedTestIds": names(summary.get("unfinishedTestIds")),
             "errors": [redact(str(value))[:2000] for value in
                        list(summary.get("errors") or [])[:MAX_MACHINE_SUMMARY_ERRORS]],
+            "frameworkExceptions": public_framework_exceptions(summary.get("frameworkExceptions", [])),
             "rawReportPublished": False}
 
 
@@ -697,8 +730,173 @@ def save(args, manifest):
     write_json(args.output / "manifest.json", manifest)
 
 
+def quality_runtime_inputs(args):
+    return {path: app.git_value(args.root, "rev-parse", f"HEAD:{path}") for path in app.RUNTIME_INPUTS}
+
+
+def resolve_quality_assets(args, manifest):
+    """Select real producer archives for packaged-asset tests, never execution."""
+    require_hosted_runner()
+    bootstrap = verify_bootstrap(args)
+    require(not manifest.get("prepared"), "Cannot replace prepared quality asset inputs")
+    repository = bootstrap["source"]["repository"]
+    expected = quality_runtime_inputs(args)
+    explicit = getattr(args, "run_id", None) or os.environ.get("RUNTIME_RUN_ID", "")
+    if explicit:
+        require(re.fullmatch(r"[1-9][0-9]*", str(explicit)), "Asset runtime run ID must be positive")
+        candidates = [app.api_json(f"/repos/{repository}/actions/runs/{explicit}")]
+    else:
+        candidates = app.api_json(
+            f"/repos/{repository}/actions/workflows/native-runtime.yml/runs?branch=main&status=success&per_page=30"
+        ).get("workflow_runs", [])
+    failures = []
+    for candidate in candidates:
+        try:
+            selection = app.validate_runtime_run(candidate, repository, expected, QUALITY_ASSET_TARGETS)
+        except RuntimeError as error:
+            failures.append({"runId": candidate.get("id"), "reason": redact(str(error))[:2000]})
+            if explicit:
+                write_json(args.output / "reports/native-assets-rejections.json", failures)
+                raise
+            continue
+        manifest["nativeAssetInputs"] = {
+            **selection, "qualitySource": copy.deepcopy(bootstrap["source"]),
+            "targets": list(QUALITY_ASSET_TARGETS), "status": "selected_not_installed",
+            "scope": "packaged_asset_bytes_only", "nativeRuntimeExecuted": False,
+            "deviceExecuted": False,
+        }
+        write_json(args.output / "reports/native-assets-selection.json", manifest["nativeAssetInputs"])
+        app.output_value("run_id", selection["runId"])
+        app.output_value("artifact_ids", ",".join(str(row["id"]) for row in selection["artifacts"]))
+        return
+    write_json(args.output / "reports/native-assets-rejections.json", failures)
+    raise RuntimeError("No unexpired exact-input OHOS asset archives for both root-test targets")
+
+
+def validate_quality_asset_selection(args, selection, bootstrap):
+    require(isinstance(selection, dict) and selection.get("qualitySource") == bootstrap["source"],
+            "Quality asset selection belongs to another source or run")
+    require(selection.get("targets") == list(QUALITY_ASSET_TARGETS)
+            and selection.get("inputCompatibility") == {
+                "method": "exact_git_objects", "objects": quality_runtime_inputs(args)},
+            "Quality asset producer inputs or targets differ")
+    require(selection.get("scope") == "packaged_asset_bytes_only"
+            and selection.get("nativeRuntimeExecuted") is False
+            and selection.get("deviceExecuted") is False,
+            "Quality assets cannot claim native or device execution")
+    require(re.fullmatch(r"[1-9][0-9]*", str(selection.get("runId", "")))
+            and re.fullmatch(r"[1-9][0-9]*", str(selection.get("runAttempt", "")))
+            and re.fullmatch(r"[0-9a-f]{40}", str(selection.get("sourceCommit", ""))),
+            "Quality asset producer identity is incomplete")
+    artifacts = selection.get("artifacts", [])
+    require(isinstance(artifacts, list) and len(artifacts) == len(QUALITY_ASSET_TARGETS)
+            and all(isinstance(row, dict) and type(row.get("id")) is int and row["id"] > 0
+                    for row in artifacts)
+            and len({row["id"] for row in artifacts}) == len(artifacts)
+            and {row.get("name") for row in artifacts} == {
+                "native-runtime-" + key for key in QUALITY_ASSET_TARGETS},
+            "Both selected OHOS artifact identities are required")
+
+
+def quality_asset_snapshot(root):
+    """Hash only the flat verified asset directory; never publish payload bytes."""
+    root = Path(root).resolve()
+    assets = root / "assets/miri"
+    require(assets.is_dir() and not linked(assets) and assets.resolve() == assets,
+            "Quality native asset directory is missing or linked")
+    rows = []
+    total = 0
+    for path in sorted(assets.iterdir()):
+        require(path.is_file() and not linked(path) and path.resolve() == path,
+                "Quality native assets must be regular flat files")
+        if path.name == ".gitkeep":
+            continue
+        require(re.fullmatch(r"(?:manifest(?:\.ohos-(?:arm64|x64))?\.json|[0-9a-f]{64}\.bin)", path.name),
+                "Unexpected quality native asset name")
+        size = path.stat().st_size
+        total += size
+        require(len(rows) < app.MAX_RUNTIME_MEMBERS and total <= app.MAX_RUNTIME_BYTES,
+                "Quality native assets exceed their inventory or byte bound")
+        rows.append({"path": path.name, "size": size, "sha256": sha256(path)})
+    names = {row["path"] for row in rows}
+    require({"manifest.json", *(f"manifest.{key}.json" for key in QUALITY_ASSET_TARGETS)}.issubset(names),
+            "Quality native assets lack both manifests or the ARM64 alias")
+    return rows
+
+
+def install_quality_assets(args, manifest):
+    """Verify both complete archives, then copy only assets into the checkout."""
+    require_hosted_runner()
+    bootstrap = verify_bootstrap(args)
+    require(not manifest.get("prepared"), "Cannot replace prepared quality asset inputs")
+    selection = manifest.get("nativeAssetInputs")
+    validate_quality_asset_selection(args, selection, bootstrap)
+    require(selection.get("status") == "selected_not_installed"
+            and str(getattr(args, "run_id", "")) == selection["runId"],
+            "Quality asset selection/run ID is absent or already consumed")
+    require(getattr(args, "source", None), "Quality asset download path is required")
+    source = Path(args.source).absolute()
+    temporary_root = Path(os.environ["RUNNER_TEMP"]).resolve()
+    require(source.is_dir() and source.resolve() == source and not linked(source)
+            and source.is_relative_to(temporary_root) and source != temporary_root,
+            "Quality asset downloads must stay below RUNNER_TEMP without links")
+    require(all(not linked(path) for path in source.rglob("*")), "Linked quality archive input")
+    selection["status"] = "installation_incomplete"
+    packages = []
+    with tempfile.TemporaryDirectory(prefix="qfli-quality-assets-", dir=temporary_root) as scratch:
+        scratch = Path(scratch)
+        combined = scratch / "combined"
+        for key in QUALITY_ASSET_TARGETS:
+            matches = list(source.rglob(f"native-runtime-{key}.tar.gz"))
+            require(len(matches) == 1, "Expected one quality runtime archive for " + key)
+            archive = matches[0]
+            require(archive.is_file() and 0 < archive.stat().st_size <= app.MAX_RUNTIME_BYTES,
+                    "Quality runtime archive exceeds download bound")
+            sidecar = archive.with_suffix(archive.suffix + ".sha256")
+            require(sidecar.is_file() and sidecar.stat().st_size <= 1024, "Invalid quality archive checksum file")
+            fields = sidecar.read_text(encoding="ascii").split()
+            require(len(fields) == 2 and fields[1] == archive.name
+                    and re.fullmatch(r"[0-9a-f]{64}", fields[0]) and fields[0] == sha256(archive),
+                    "Quality runtime archive checksum differs")
+            extracted = scratch / key
+            app.extract_runtime(archive, extracted)
+            data = app.verify_runtime_payload(extracted, key, selection)
+            app.merge_verified_tree(extracted / "assets/miri", combined / "assets/miri")
+            packages.append({"target": key, "archiveSha256": fields[0], "manifestId": data["id"],
+                             "manifestSha256": sha256(extracted / "assets/miri" / f"manifest.{key}.json"),
+                             "rustVersion": data["rustVersion"], "rustCommit": data["rustCommit"]})
+        # Do not expose one architecture when the other failed verification.
+        rows = quality_asset_snapshot(combined)
+        require(packages[0]["manifestId"] != packages[1]["manifestId"],
+                "Quality OHOS architectures must have distinct runtime identities")
+        destination = args.root / "assets/miri"
+        require(destination.is_dir() and not linked(destination) and destination.resolve() == destination,
+                "Quality asset destination must be an existing unlinked directory")
+        app.merge_verified_tree(combined / "assets/miri", destination)
+        require(quality_asset_snapshot(args.root) == rows, "Installed quality asset inventory differs")
+    selection.update(status="verified_assets_only", packages=packages, files=rows,
+                     totalBytes=sum(row["size"] for row in rows))
+    try:
+        write_json(args.output / "reports/native-assets.json", selection)
+        verify_report_bounds(args)
+    except BaseException:
+        selection["status"] = "installation_incomplete"
+        raise
+
+
+def verify_quality_assets(args, manifest, bootstrap):
+    selection = manifest.get("nativeAssetInputs")
+    validate_quality_asset_selection(args, selection, bootstrap)
+    require(selection.get("status") == "verified_assets_only"
+            and read_json(args.output / "reports/native-assets.json") == selection,
+            "Quality native asset installation is incomplete or its report changed")
+    require(quality_asset_snapshot(args.root) == selection.get("files"),
+            "Quality native assets changed after verification")
+
+
 def prepare(args, manifest):
     bootstrap = verify_bootstrap(args)
+    verify_quality_assets(args, manifest, bootstrap)
     manifest.update(source=bootstrap["source"], core=copy.deepcopy(bootstrap["core"]),
                     flutter=copy.deepcopy(bootstrap["flutter"]))
     before = source_inputs(args.root)
@@ -725,6 +923,7 @@ def prepare(args, manifest):
     require(after_tracked == before_tracked,
             "Dependency restore changed tracked repository inputs; review generated-source changes before retrying")
     verify_bootstrap(args)
+    verify_quality_assets(args, manifest, bootstrap)
     manifest["resolvedDependencies"] = verify_resolved_paths(args)
     _, dart = executables()
     manifest["sdkExecutableHashes"] = {"flutter": sha256(flutter), "dart": sha256(dart)}
@@ -742,6 +941,7 @@ def prepare(args, manifest):
 def verify_prepared(args, manifest):
     require(manifest.get("prepared") is True, "Quality prepare did not complete; no check may pass")
     bootstrap = verify_bootstrap(args)
+    verify_quality_assets(args, manifest, bootstrap)
     for key in ("source", "flutter"):
         require(manifest.get(key) == bootstrap.get(key), "Quality/bootstrap provenance changed: " + key)
     require(manifest.get("core", {}).get("commit") == bootstrap.get("core", {}).get("commit"),
@@ -809,9 +1009,52 @@ def machine_summary(path, root, expected):
     results = {}
     done = []
     failures = []
+    exception_prints = {}
+    active_exception_blocks = {}
+    exception_bytes = 0
+    active_exception_bytes = 0
     errored = set()
     started_processes = 0
     count = 0
+
+    def finish_exception(test_id):
+        nonlocal exception_bytes, active_exception_bytes
+        block = active_exception_blocks.pop(test_id, None)
+        if block is None:
+            return
+        active_exception_bytes -= block["bytes"]
+        # Never sanitize a partially captured block: an omitted suffix could
+        # close a credential marker. Overflow omits the entire diagnostic.
+        remaining = MAX_FRAMEWORK_EXCEPTION_BYTES - exception_bytes - active_exception_bytes
+        if block["overflow"] or remaining <= 0:
+            return
+        # Redaction can expand short lines. Reserve every other active block
+        # before converting this completed raw block into stored public text.
+        text = framework_exception_text("\n".join(block["parts"]), min(
+            MAX_FRAMEWORK_EXCEPTION_RECORD_BYTES, remaining))
+        exception_bytes += len(text.encode("utf-8"))
+        exception_prints.setdefault(test_id, []).append(text)
+
+    def capture_exception(test_id, message):
+        nonlocal active_exception_bytes
+        for line in message.splitlines():
+            if FRAMEWORK_EXCEPTION_HEADER in line:
+                finish_exception(test_id)
+                active_exception_blocks[test_id] = {"parts": [], "bytes": 0, "overflow": False}
+            block = active_exception_blocks.get(test_id)
+            if block is None:
+                continue
+            size = len(line.encode("utf-8")) + 1
+            if active_exception_bytes + exception_bytes + size > MAX_FRAMEWORK_EXCEPTION_BYTES:
+                active_exception_bytes -= block["bytes"]
+                block.update(parts=[], bytes=0, overflow=True)
+            if not block["overflow"]:
+                block["parts"].append(line)
+                block["bytes"] += size
+                active_exception_bytes += size
+            if re.fullmatch(r"\s*[═─━=]{8,}\s*", line):
+                finish_exception(test_id)
+
     with path.open(encoding="utf-8") as stream:
         for line in stream:
             count += 1
@@ -851,28 +1094,44 @@ def machine_summary(path, root, expected):
                 tests[test["id"]] = redact(str(test.get("name", "")))[:500]
             elif kind == "testDone":
                 test_id = event["testID"]
+                finish_exception(test_id)
                 require(test_id in tests and test_id not in results
                         and event.get("result") in ("success", "failure", "error"),
                         "Duplicate or malformed test completion")
                 results[test_id] = {"result": event["result"], "skipped": event.get("skipped") is True,
                                     "hidden": event.get("hidden") is True}
+                if event["result"] == "success" and test_id not in errored:
+                    exception_bytes -= sum(len(text.encode("utf-8"))
+                                           for text in exception_prints.pop(test_id, []))
             elif kind == "done":
                 done.append(event.get("success"))
             elif kind == "error":
+                finish_exception(event.get("testID"))
                 errored.add(event.get("testID"))
                 if len(failures) < 30:
                     failures.append(redact(str(event.get("error", "test error")))[:2000])
+            elif kind == "print":
+                message = event.get("message")
+                test_id = event.get("testID")
+                if test_id in tests and test_id not in results and isinstance(message, str):
+                    capture_exception(test_id, message)
+    for test_id in list(active_exception_blocks):
+        finish_exception(test_id)
     visible = {key: value for key, value in results.items() if not value["hidden"]}
     skipped = sum(row["skipped"] for row in visible.values())
     failed = len(errored | {key for key, row in results.items() if row["result"] in ("failure", "error")})
     unfinished = sorted(str(key) for key in set(tests) - set(results))
     missing = sorted(set(expected) - suites)
+    failed_ids = errored | {key for key, row in results.items() if row["result"] in ("failure", "error")}
     summary = {"scope": "full_root_test_directory", "suiteFiles": sorted(suites), "missingSuiteFiles": missing,
                "completed": len(visible), "passed": sum(row["result"] == "success" and not row["skipped"]
                                                         for row in visible.values()),
                "skipped": skipped, "failed": failed, "unfinishedTestIds": unfinished, "protocolDone": done == [True],
                "skippedTestNames": [tests.get(key, str(key)) for key, row in visible.items() if row["skipped"]][:100],
                "errors": failures, "rawReportSha256": sha256(path), "rawReportBytes": path.stat().st_size,
+               "frameworkExceptions": [{"testId": str(key), "text": text}
+                                       for key, messages in exception_prints.items() if key in failed_ids
+                                       for text in messages],
                "rawReportPublished": False, "flutterStartedProcesses": started_processes,
                "nativeRuntimeExecuted": False, "deviceExecuted": False}
     summary["success"] = summary["passed"] > 0 and not failed and not unfinished and not missing and done == [True]
@@ -1078,13 +1337,16 @@ def finalize(args, manifest, job_status):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("prepare", *CHECKS, "finalize"))
+    parser.add_argument("stage", choices=("resolve-assets", "install-assets", "prepare", *CHECKS, "finalize"))
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--bootstrap-dir", type=Path)
     parser.add_argument("--job-status", default="failure")
+    parser.add_argument("--source", type=Path)
+    parser.add_argument("--run-id")
     options = parser.parse_args()
     require_hosted_runner()
     args = quality_args(output=options.output_dir, bootstrap=options.bootstrap_dir)
+    args.source, args.run_id = options.source, options.run_id
     confined_output(args)
     args.output.mkdir(parents=True, exist_ok=True)
     path = args.output / "manifest.json"
@@ -1093,7 +1355,11 @@ def main():
         finalize(args, manifest, options.job_status)
         return
     try:
-        if options.stage == "prepare":
+        if options.stage == "resolve-assets":
+            resolve_quality_assets(args, manifest)
+        elif options.stage == "install-assets":
+            install_quality_assets(args, manifest)
+        elif options.stage == "prepare":
             require(not manifest.get("prepared"), "Quality prepare must not reuse prepared results")
             prepare(args, manifest)
         else:

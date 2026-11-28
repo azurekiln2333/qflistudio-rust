@@ -47,6 +47,15 @@ the same callback in `aboutToDisappear()`.
   has finished build/layout. Call `binding.allowFirstFrame()` in `finally`.
 - Other platforms keep the shared Flutter startup screen and do not report
   native progress. No new dependencies or environment keys are introduced.
+- A hosted OHOS startup fixture must select the phone shell explicitly with
+  `QfliApp(formFactor: AppFormFactor.phone)`. The OHOS debug platform override
+  controls the startup branch, but core resolves its default form factor from
+  the actual host OS. A Linux runner does not become a phone through that
+  override alone.
+- Keep the real entry point and its startup state when applying this fixture
+  input. Preserve the original app key, stores, readiness notifier, navigator
+  key and GitHub controller. Do not replace readiness, progress, timing or
+  first-frame assertions with a fabricated ready application.
 
 ## 4. Validation & Error Matrix
 
@@ -76,6 +85,20 @@ storage and platform channels. Assert that frames remain deferred during
 loading, the three completion fractions are emitted, and `HomePage` is built
 before frame release. After the timing and frame waits, assert frames are
 enabled and no Flutter exception was captured.
+
+For the hosted phone fixture, call `application.main()` and observe the
+deferred splash first. Rebuild the existing `QfliApp` with its original
+dependencies and `formFactor: AppFormFactor.phone` before advancing startup
+time. Keep the `ready` notifier produced by the entry point and require the
+same `HomePage`, progress fractions and frame-release ordering.
+
+Follow-up on 2026-11-28: quality run `46082334790` at source
+`8b92ddc98151a394a57a5d5ce3eb0bea35f2266e` reported the startup test as failed.
+Its public error did not expose the underlying exception body or stack.
+The explicit phone input is a source-reviewed fixture correction against
+core `8e031313ffc8d531c5a6b4d131f721f35da04c86`; the new repair is UNRUN.
+It does not establish that form-factor selection caused that exact failure.
+See the dated [quality input evidence](../../tasks/11-26-github-workspace-migration/research/quality-inputs-8b92ddc-2026-11-28.md).
 
 Verified on 2026-10-01: `dart analyze lib test`, the startup regression test,
 and the native ArkTS compile passed. Device checks remain paused by the user.
