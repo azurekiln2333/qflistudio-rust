@@ -65,7 +65,7 @@ plus derived finalization. Installer run `46113314581` passed six platform
 jobs; iOS embedding failed on missing `hashlib.file_digest` before packaging.
 No infrastructure rerun or historical failure waiver applies to these fixes.
 
-Current disjoint ownership supersedes the historical worker table below:
+Disjoint ownership at that first takeover checkpoint was:
 p2 implements the exact two whitespace hunks and reviews p3; p3 owns only
 `tool/ci/app_build.py` and `tool/ci/test_app_build.py` for iOS interpreter
 binding; p4 is the sole CI watcher/evidence writer; p5 owns the dated parity
@@ -78,6 +78,59 @@ its own gate, target parity, receiver ACK and hosted quality results. Keep
 `scripts`, `native`, native-runtime workflow, core and SDK identities intact.
 Write `done.json` only after final-SHA evidence and truthful triage. Preserve
 both stashes, all baselines, ignored files and source-retirement holds.
+
+### Follow-up checkpoint — 2026-11-28, after 22:24 +08:00
+
+Published `2afc72c3b4fa3e51580bc6b3ec06c6ce363e893c` passed the exact
+gate at 21:57:04. Source/live GitHub/target had clean tracked parity at
+21:59:39: tree `87cf768a53ec503ad807564e2c67689bc274a200`, 878 rows,
+zero differences. The receiver supplied a new exact-SHA ACK at 21:59:12.
+These observations remain dated snapshots after source repair resumes.
+
+Cloud `46152144084` and quality `46152143988` passed. Quality formatted
+46 files with zero changes, reported no analysis issues, and completed the
+root protocol with 334 passed, 20 skipped and zero failed across 22 suites.
+Installer `46152143967` passed three orchestration and six platform jobs.
+iOS job `141001008941` repeated the missing `hashlib.file_digest` exception;
+packaging was skipped, with no verified IPA or iOS intermediate. The child
+interpreter identity and effective PATH were not measured. Source approval
+of the first PATH repair did not establish successful Xcode execution.
+
+P3 now owns only `tool/ci/app_build.py`, `tool/ci/test_app_build.py` and
+`ios/Runner.xcodeproj/project.pbxproj` for direct interpreter binding at the
+embed phase. P2 independently reviews the actual diff and Xcode/shell
+boundary. P4 alone owns CI observations and the external evidence record.
+P5 preserves the dated source evidence and independently reviews recovery.
+The coordinator owns specs, task/journal updates, receipts, Git and the gate.
+The correction and its meaningful phase regressions require hosted execution.
+
+At 22:11:11, a watcher metadata command truncated external `ci-watch.json`.
+P4 recovered the 124325-character original history and retained exact-SHA
+evidence from saved local output, using a fail-stop temporary write and atomic
+replacement at 22:24:01. All 23 original top-level historical values were
+recovered semantically. The original pages, backup and incident provenance
+remain external. Some interim fields and final per-step timestamps were not
+recovered; the recovery record names those gaps. No source, Git or GitHub
+state changed. Independent evidence review remains a separate gate.
+
+P2 subsequently approved the frozen three-file correction and seven-file
+source/documentation scope. The actual phase uses exact-name `printenv`
+presence detection, validates configured executable paths and invokes the
+Python file directly. Hosted regressions cover spaces, invalid overrides,
+absent fallback, unrelated multiline values and exit propagation. No local
+execution or exact-next-SHA hosted pass is claimed.
+
+P5 accepted the recovery after P4 removed mixed Android/iOS/macOS excerpts
+from per-job fields into an explicitly unattributed capture and moved a
+superseded quality-helper read failure out of Cloud totals. All artifact
+metadata matched retained observations. Seventeen legacy timestamp strings
+changed trailing-zero presentation only; the instants remain unchanged.
+Unrecovered interim/per-step fields and unknown child identity stay explicit.
+
+No unchanged rerun, local executable check or artifact download is authorized.
+The next reviewed revision needs a clean exact-SHA gate request to `w65:pD`,
+renewed target parity/ACK and its own hosted results. Preserve producer roots,
+the approved core/SDK, both stashes, ignored files and all retirement holds.
 
 1. Capture a fresh source/target status and all remote advertised heads.
    Preserve concurrent edits and the original object store. Record ownership.

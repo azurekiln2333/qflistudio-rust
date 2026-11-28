@@ -161,22 +161,43 @@ redacts its bounded 2 MiB log and publishes only a bounded console tail.
 Generic Development Team advice after Xcode failure is not the underlying
 diagnosis. The added verbosity does not establish a signing fix.
 
-For iOS, `release_command(args, env)` sets `FLUTTER_XCODE_PATH` to the
-resolved parent of `sys.executable`, followed by the existing `env["PATH"]`
-using the host path separator. It leaves the ordinary `PATH` unchanged.
+The following direct-interpreter source contract completed independent review.
+Exact-revision hosted execution remains pending.
+
+For iOS, `release_command(args, env)` passes the resolved absolute
+`sys.executable` as `FLUTTER_XCODE_QFLI_RUNTIME_PYTHON`. It leaves the ordinary
+`PATH` unchanged and does not rely on the standard Xcode `PATH` setting.
 The pinned Flutter source forwards `FLUTTER_XCODE_*` environment values as
 individual `xcodebuild` settings (`ios/xcodeproj.dart:347-365`,
 `ios/mac.dart:524,744-748` at `adaf911c35c9136a7d18fc424d714c9ec7724e60`).
-Thus Xcode receives `PATH=<runner Python bin>:<runner PATH>` and its Run Script
-phase can resolve the existing wrapper's bare `python3` to the hosted Python.
-Do not shell-quote this value: the SDK passes it as one argument in a list.
+The custom setting reaches the Embed Rust Runtime phase as
+`QFLI_RUNTIME_PYTHON`. The phase invokes that executable and
+`$PROJECT_DIR/../scripts/embed_miri_frameworks.py` directly with quoted paths.
+Do not add shell quotes to the environment value: the SDK passes it as one
+argument in a list. Quote the variable when the shell phase invokes it.
+Read the exported build-setting variable with ordinary shell expansion. Do
+not require Xcode to rewrite shell command substitutions or fallback syntax.
+The regression executes the decoded PBX phase with an injected environment;
+it does not simulate or establish Xcode's internal build-setting processing.
+
+An absent setting preserves the prior `python3` lookup for unconfigured Xcode
+use. A configured interpreter must be an absolute executable file. Reject an
+invalid configured path rather than falling back silently. Embedding still
+receives the same `ios` argument and executes the unchanged hashing/signing
+implementation. Neither the interpreter nor the source script is copied or
+rewritten in the runtime producer input trees.
 
 This targets the observed iOS embed failure on missing `hashlib.file_digest`.
 The failed log records outer Python 3.13.15, but not the embed interpreter's
 path or version. An older system interpreter is an inference, not a measured
-version. Outer `actions/setup-python` alone did not bind the Xcode phase.
+version. Outer `actions/setup-python` did not establish the child identity.
+The first `FLUTTER_XCODE_PATH` repair still produced the error at app `2afc72c`,
+installer run `46152143967`, iOS job `141001008941`. Passing a PATH build
+setting and unit-testing its string did not establish which interpreter the
+phase executed. The direct custom setting requires actual hosted phase and
+iOS execution evidence before a repair-success claim.
 Do not change native/scripts producer inputs to bypass their exact Git-object
-compatibility gate. Other platforms receive no new Xcode PATH setting.
+compatibility gate. Other platforms receive no new interpreter setting.
 Missing hash APIs or embedding failures still fail the build; this environment
 contract does not waive hashing, unsigned-package limits or real hosted iOS
 acceptance. Helper source review alone cannot establish that acceptance.
@@ -429,6 +450,9 @@ root-test execution pass is established.
 | Fork run, wrong source objects, expired runtime or bad checksum | Reject selection/install with source-bound diagnostics |
 | Producer hashes disagree, JNI-only corruption or extra payload | Reject before Flutter embedding |
 | OHOS typed properties malformed or build fails | Fail and restore both original config byte sequences |
+| iOS custom interpreter supplied as an empty, relative, missing or nonexecutable path | Fail the embed phase without trying a PATH fallback |
+| iOS custom interpreter setting absent in manual Xcode use | Preserve the previous `python3` lookup; do not claim hosted Python identity |
+| iOS embed script exits nonzero | Preserve that failure; no successful package result |
 | Missing package, wrong ABI/ID/runtime bytes or absent install evidence | No successful installer publication |
 | Intermediate bound/link/hash violation | Remove partial intermediate output and fail |
 | Missing root suite, incomplete protocol, all-skipped or changed inputs | Quality cannot pass |
@@ -449,6 +473,11 @@ root-test execution pass is established.
   bounded reports with honest signing/device limits.
 - Good: the consumer root overrides both `re_editor` and `xterm`, and committed
   lock metadata plus hosted resolution point to the same pinned core vendors.
+- Good: iOS invokes the supplied absolute Python path with quoted script and
+  project paths; a PATH `python3` does not override the configured executable.
+- Base: a manual iOS build without the setting retains its `python3` lookup.
+- Bad: an explicitly invalid interpreter silently falls back, or a passing
+  environment-string assertion is reported as successful Xcode integration.
 - Base: required pinned inputs are absent. Independent helper contracts can run; core-bound
   application jobs fail with blocked evidence rather than becoming skipped passes.
 - Bad: check out mutable main without recording its SHA, claim production approval
@@ -489,10 +518,14 @@ iOS verbosity, reject post-build lock or vendor-root drift before compatibility,
 and record the final package-config hash after harmless metadata changes.
 Check Windows long-path setup before checkout from the existing workspace.
 For iOS interpreter binding, assert the unchanged ordinary PATH, the resolved
-runner Python directory first in `FLUTTER_XCODE_PATH`, and unchanged unsigned,
-verbose and release-plugin flags. Assert no new PATH setting on other platform
-branches. Run the helpers and actual iOS embedding on GitHub-hosted runners;
-source review of the SDK pass-through is not execution evidence.
+absolute executable in `FLUTTER_XCODE_QFLI_RUNTIME_PYTHON`, and unchanged
+unsigned, verbose and release-plugin flags. Assert no new setting on other
+platform branches. Execute the extracted committed shell phase on hosted
+POSIX runners with paths containing spaces, a hostile fallback `python3`, an
+invalid configured path and an absent override. Require the chosen executable
+and exact `ios` argument, and preserve failure exit codes. Run the actual iOS
+embedding too; source review of SDK forwarding and helper string assertions
+alone do not prove that Xcode used the intended interpreter.
 These new regressions are authored but unexecuted until the next hosted run.
 The drawer timeout diagnostic retains the 200-attempt budget and all assertions;
 root/src/leaf match counts are diagnostic evidence, not a passing test.
@@ -558,6 +591,16 @@ add the missing dev-only Android plugin to the release classpath.
 
 Correct: let the pinned SDK regenerate release plugins, then verify unchanged
 lock bytes and canonical core/vendor roots before claiming build compatibility.
+
+Wrong: infer the Python chosen inside Xcode from setup-python's outer PATH,
+or test only the helper's environment string and claim the phase uses it.
+
+Correct: pass the exact executable through the dedicated Xcode setting,
+invoke it in the actual embed phase, and execute the decoded committed phase
+in hosted regression tests. A real iOS build must separately verify the
+Flutter-to-Xcode boundary. The repeated `2afc72c` failure exposed both an
+unverified boundary assumption and a test gap; the log does not identify the
+child executable or prove which PATH transformations occurred.
 
 Wrong: choose the latest successful native artifact, verify only its outer hash,
 reuse generic IDs and mark an unsigned HAP plus logs as a completed installer.

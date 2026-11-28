@@ -270,5 +270,32 @@ Recovered exact af4dc20 gate/parity/receiver ACK and refreshed migration receipt
 
 ### Status
 
-**In progress** — repairs committed and source-reviewed. Final gate,
+**In progress at the original checkpoint** — repairs committed and source-reviewed. Final gate,
 tracked parity/ACK and hosted validation remain pending.
+
+### Later checkpoint — 2026-11-28, 22:24 +08:00
+
+Gate publication `2afc72c` received clean 878-row tracked parity and a fresh
+receiver ACK. Cloud `46152144084` and application quality `46152143988`
+passed: format 46 files/zero changes, analysis clean, full root protocol
+334 passed/20 skipped/zero failed. Installer `46152143967` passed six of
+seven platform jobs; iOS repeated the `hashlib.file_digest` failure and
+produced reports only. Its child interpreter identity remains unknown.
+
+The first PATH repair was insufficient in hosted execution. P3 owns direct
+embed-phase interpreter binding and hosted regression sources; p2 reviews
+that boundary. No new-revision execution success is claimed. P5 appended
+dated evidence without extending the prior clean snapshot to current edits.
+
+P4 recovered accidentally truncated external CI metadata from retained local
+output. Raw history and incident provenance remain external, with recovery
+gaps explicit. Source/Git/GitHub state was unaffected. The next revision still
+requires a gate, new target parity/ACK and hosted evidence. Migration remains
+in progress; product follow-ups and source-retirement holds remain open.
+
+P2 subsequently completed final source review of the direct-interpreter
+correction, including exact-name presence detection and the decoded-phase
+regression. P5 accepted corrected recovery attribution while retaining the
+explicit missing fields and timestamp presentation differences. These
+reviews authorize the next coordinator commit/gate step; hosted execution
+and renewed exact-SHA handover remain pending.
