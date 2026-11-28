@@ -156,7 +156,8 @@ void main() {
       expect(
         fixture.entry(fixture.secondary, 'inspect.rs').hitTestable(),
         findsOneWidget,
-        reason: 'Sidebar reopen: the secondary nested leaf must remain visible.',
+        reason:
+            'Sidebar reopen: the secondary nested leaf must remain visible.',
       );
 
       final saved = await fixture.readHistory(tester);
@@ -188,7 +189,8 @@ void main() {
                 .hitTestable()
                 .evaluate()
                 .isNotEmpty,
-        failureDetails: () => 'Reconstruction: both nested leaves must restore.',
+        failureDetails: () =>
+            'Reconstruction: both nested leaves must restore.',
       );
       expect(fixture.root(fixture.primary), findsOneWidget);
       expect(fixture.root(fixture.secondary), findsOneWidget);
